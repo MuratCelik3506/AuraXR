@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>IntentFormer — Interactive Test Environment</title>
+  <meta name="description" content="Single-sample interactive test UI for the Intent-Aware Proactive XR Framework."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:#0a0c10; --bg2:#0f1117; --bg3:#141720;
+      --surface:#1a1e2a; --surface2:#212535;
+      --border:#2a2f3e; --border2:#363c52;
+      --text:#e8eaf0; --muted:#6b7280;
+      --accent:#6366f1; --accent2:#8b5cf6;
+      --green:#22c55e; --amber:#f59e0b; --red:#ef4444; --cyan:#06b6d4;
+      --r:12px; --r2:8px;
+    }
+    html { scroll-behavior:smooth; }
+    body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+
+    /* ── App layout ── */
+    .app { display:grid; grid-template-columns:420px 1fr; grid-template-rows:auto 1fr; min-height:100vh; }
+    header {
+      grid-column:1/-1; background:var(--bg2); border-bottom:1px solid var(--border);
+      padding:16px 28px; display:flex; align-items:center; gap:16px;
+    }
+    .logo-ring {
+      width:40px; height:40px; border-radius:50%; flex-shrink:0;
+      background:linear-gradient(135deg,var(--accent),var(--accent2));
+      display:flex; align-items:center; justify-content:center; font-size:18px;
+      box-shadow:0 0 20px rgba(99,102,241,.4);
+    }
+    .header-text h1 { font-size:16px; font-weight:700; }
+    .header-text p  { font-size:11px; color:var(--muted); }
+    .badge {
+      margin-left:auto; background:rgba(99,102,241,.15); border:1px solid rgba(99,102,241,.3);
+      color:var(--accent); font-size:11px; font-weight:600; padding:3px 10px; border-radius:20px;
+    }
+
+    /* ── Sidebar ── */
+    aside {
+      background:var(--bg2); border-right:1px solid var(--border);
+      overflow-y:auto; display:flex; flex-direction:column;
+    }
+
+    /* Tabs */
+    .tab-bar {
+      display:flex; border-bottom:1px solid var(--border); flex-shrink:0;
+    }
+    .tab-btn {
+      flex:1; padding:12px 6px; background:none; border:none; color:var(--muted);
+      font-size:12px; font-weight:600; cursor:pointer; border-bottom:2px solid transparent;
+      transition:all .2s; letter-spacing:.3px;
+    }
+    .tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); background:rgba(99,102,241,.05); }
+    .tab-btn:hover:not(.active) { color:var(--text); }
+
+    .tab-panel { display:none; padding:20px; flex-direction:column; gap:16px; }
+    .tab-panel.active { display:flex; }
+
+    /* ── Shared controls ── */
+    .sec-label { font-size:10px; font-weight:700; letter-spacing:1.2px; text-transform:uppercase; color:var(--muted); margin-bottom:8px; }
+    .sep { height:1px; background:var(--border); }
+
+    /* Preset grid */
+    .preset-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .preset-btn {
+      background:var(--surface); border:1.5px solid var(--border); border-radius:var(--r2);
+      padding:10px 8px; cursor:pointer; text-align:center; font-size:11px; color:var(--muted);
+      transition:all .18s; display:flex; flex-direction:column; gap:3px; align-items:center;
+    }
+    .preset-btn .emoji { font-size:18px; }
+    .preset-btn:hover  { border-color:var(--accent); color:var(--text); background:var(--surface2); }
+    .preset-btn.active { border-color:var(--accent); background:rgba(99,102,241,.12); color:var(--text); }
+
+    /* Sliders */
+    .field { display:flex; flex-direction:column; gap:6px; }
+    .field label { font-size:12px; color:var(--muted); font-weight:500; }
+    .val-row { display:flex; align-items:center; gap:10px; }
+    input[type="range"] {
+      -webkit-appearance:none; flex:1; height:4px; border-radius:2px;
+      background:var(--border2); outline:none; cursor:pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance:none; width:15px; height:15px; border-radius:50%;
+      background:var(--accent); box-shadow:0 0 8px rgba(99,102,241,.5); cursor:pointer;
+    }
+    .val-tag {
+      font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:500;
+      background:var(--surface); border:1px solid var(--border); border-radius:6px;
+      padding:2px 8px; min-width:50px; text-align:center; color:var(--accent);
+    }
+
+    input[type="number"], input[type="text"], select {
+      background:var(--surface); border:1.5px solid var(--border); border-radius:var(--r2);
+      color:var(--text); font-family:'JetBrains Mono',monospace; font-size:12px;
+      padding:7px 10px; width:100%; outline:none; transition:border-color .2s;
+    }
+    input[type="number"]:focus, input[type="text"]:focus, select:focus { border-color:var(--accent); }
+    select option { background:var(--surface); }
+
+    /* ── Joint Editor ── */
+    .hand-tabs { display:flex; gap:8px; margin-bottom:10px; }
+    .hand-tab-btn {
+      flex:1; padding:8px; background:var(--surface); border:1.5px solid var(--border);
+      border-radius:var(--r2); color:var(--muted); font-size:12px; font-weight:600;
+      cursor:pointer; transition:all .18s; text-align:center;
+    }
+    .hand-tab-btn.active { border-color:var(--accent); background:rgba(99,102,241,.1); color:var(--text); }
+
+    .joint-table { width:100%; border-collapse:collapse; font-size:11px; }
+    .joint-table th {
+      background:var(--bg3); color:var(--muted); padding:6px 4px; text-align:center;
+      font-size:10px; font-weight:700; letter-spacing:.5px; border-bottom:1px solid var(--border);
+    }
+    .joint-table td { padding:3px 3px; border-bottom:1px solid rgba(42,47,62,.5); }
+    .joint-table tr:hover td { background:rgba(99,102,241,.04); }
+    .joint-name { color:var(--muted); font-size:10px; font-weight:600; padding-left:6px !important; }
+    .joint-input {
+      width:100%; background:var(--bg3); border:1px solid var(--border);
+      border-radius:4px; color:var(--text); font-family:'JetBrains Mono',monospace;
+      font-size:11px; padding:3px 5px; text-align:right; outline:none;
+      transition:border-color .15s;
+    }
+    .joint-input:focus { border-color:var(--accent); }
+    .axis-x { color:#f87171; }
+    .axis-y { color:#4ade80; }
+    .axis-z { color:#60a5fa; }
+
+    /* Randomise joint button */
+    .small-btn {
+      background:var(--surface); border:1px solid var(--border); border-radius:var(--r2);
+      color:var(--muted); font-size:11px; padding:5px 10px; cursor:pointer;
+      transition:all .18s; font-weight:500;
+    }
+    .small-btn:hover { border-color:var(--accent); color:var(--text); }
+
+    /* File upload */
+    .upload-zone {
+      border:2px dashed var(--border2); border-radius:var(--r);
+      padding:24px; text-align:center; cursor:pointer; transition:all .2s;
+      background:var(--bg3);
+    }
+    .upload-zone:hover, .upload-zone.drag { border-color:var(--accent); background:rgba(99,102,241,.05); }
+    .upload-zone .upload-icon { font-size:28px; margin-bottom:6px; }
+    .upload-zone p { font-size:12px; color:var(--muted); }
+    .upload-zone strong { color:var(--accent); }
+    #fileInput { display:none; }
+
+    /* Raw json area */
+    .json-area {
+      background:var(--surface); border:1.5px solid var(--border); border-radius:var(--r2);
+      color:#a5b4fc; font-family:'JetBrains Mono',monospace; font-size:10px;
+      padding:10px; width:100%; height:80px; resize:vertical; outline:none;
+      transition:border-color .2s;
+    }
+    .json-area:focus { border-color:var(--accent); }
+    .json-preview {
+      background:var(--bg3); border:1px solid var(--border); border-radius:var(--r2);
+      font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted);
+      padding:8px 10px; max-height:60px; overflow:hidden; line-height:1.4;
+      word-break:break-all;
+    }
+
+    /* Info callout */
+    .callout {
+      background:rgba(99,102,241,.08); border:1px solid rgba(99,102,241,.2);
+      border-radius:var(--r2); padding:10px 12px; font-size:11px; color:#a5b4fc;
+      line-height:1.6;
+    }
+    .callout b { color:var(--text); }
+
+    /* ── Run button ── */
+    #btnInfer {
+      width:100%; padding:13px; border-radius:var(--r); border:none;
+      background:linear-gradient(135deg,var(--accent),var(--accent2));
+      color:#fff; font-size:14px; font-weight:700; cursor:pointer;
+      display:flex; align-items:center; justify-content:center; gap:8px;
+      transition:opacity .2s, box-shadow .2s;
+      box-shadow:0 4px 18px rgba(99,102,241,.4);
+    }
+    #btnInfer:hover { opacity:.9; box-shadow:0 6px 28px rgba(99,102,241,.6); }
+    #btnInfer.loading { pointer-events:none; opacity:.7; }
+    .spinner {
+      display:none; width:15px; height:15px;
+      border:2.5px solid rgba(255,255,255,.3); border-top-color:#fff;
+      border-radius:50%; animation:spin .6s linear infinite;
+    }
+    #btnInfer.loading .spinner { display:block; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .kbd {
+      font-size:11px; color:var(--muted); text-align:center;
+      font-family:'JetBrains Mono',monospace;
+    }
+    kbd {
+      background:var(--surface); border:1px solid var(--border); border-radius:4px;
+      padding:1px 5px; font-size:10px;
+    }
+
+    /* sticky run bar */
+    .run-bar { padding:16px 20px; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:8px; }
+
+    /* ── Main results ── */
+    main { padding:24px 28px; overflow-y:auto; display:flex; flex-direction:column; gap:20px; }
+    .empty-state {
+      flex:1; display:flex; flex-direction:column; align-items:center;
+      justify-content:center; gap:12px; color:var(--muted); text-align:center;
+    }
+    .empty-icon { font-size:52px; }
+    .empty-state h2 { font-size:18px; font-weight:600; color:var(--text); }
+    .empty-state p { font-size:13px; max-width:320px; line-height:1.6; }
+
+    /* Input method chips */
+    .method-chips { display:flex; gap:8px; flex-wrap:wrap; }
+    .method-chip {
+      background:var(--surface); border:1px solid var(--border); border-radius:20px;
+      padding:5px 12px; font-size:11px; color:var(--muted); font-weight:500;
+    }
+
+    /* Cards */
+    .card { background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:18px 20px; }
+    .card-title { font-size:10px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:var(--muted); margin-bottom:12px; }
+
+    /* Hero prediction */
+    .hero-pred { display:flex; align-items:center; gap:14px; }
+    .pred-ring {
+      width:58px; height:58px; border-radius:50%; flex-shrink:0;
+      background:linear-gradient(135deg,var(--accent),var(--accent2));
+      display:flex; align-items:center; justify-content:center; font-size:24px;
+      box-shadow:0 0 24px rgba(99,102,241,.35);
+    }
+    .pred-ring.ghost { background:linear-gradient(135deg,var(--green),#16a34a); box-shadow:0 0 32px rgba(34,197,94,.4); }
+    .pred-name { font-size:22px; font-weight:700; text-transform:capitalize; }
+    .pred-sub  { font-size:11px; color:var(--muted); margin-top:2px; }
+    .conf-badge {
+      font-size:20px; font-weight:800; font-family:'JetBrains Mono',monospace;
+      margin-left:auto;
+    }
+    .conf-badge.high { color:var(--green); }
+    .conf-badge.mid  { color:var(--amber); }
+    .conf-badge.low  { color:var(--red);   }
+
+    /* Ghost banner */
+    .ghost-banner {
+      display:flex; align-items:center; gap:10px; padding:12px 16px;
+      border-radius:var(--r2); font-weight:600; font-size:13px;
+    }
+    .ghost-banner.on { background:rgba(34,197,94,.1); border:1px solid rgba(34,197,94,.3); color:var(--green); }
+    .ghost-banner.off{ background:rgba(107,114,128,.06); border:1px solid var(--border); color:var(--muted); }
+    .gdot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+    .ghost-banner.on  .gdot { background:var(--green); box-shadow:0 0 8px var(--green); animation:pulse 1.4s ease-in-out infinite; }
+    .ghost-banner.off .gdot { background:var(--muted); }
+    @keyframes pulse { 0%,100%{box-shadow:0 0 4px var(--green);}50%{box-shadow:0 0 14px var(--green);} }
+
+    /* Metric grid */
+    .metric-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+    .mcard { background:var(--bg3); border:1px solid var(--border); border-radius:var(--r2); padding:12px 14px; text-align:center; }
+    .mcard .mv { font-size:24px; font-weight:700; font-family:'JetBrains Mono',monospace; color:var(--cyan); }
+    .mcard .ml { font-size:11px; color:var(--muted); margin-top:2px; }
+
+    /* top5 */
+    .top5 { display:flex; flex-direction:column; gap:9px; }
+    .t5i { display:flex; align-items:center; gap:10px; animation:fadeIn .3s ease both; }
+    @keyframes fadeIn { from{opacity:0;transform:translateX(-10px)} to{opacity:1;transform:none} }
+    .t5r { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); width:16px; text-align:right; }
+    .t5w { flex:1; }
+    .t5l { font-size:12px; text-transform:capitalize; margin-bottom:3px; }
+    .t5bg { background:var(--bg3); border-radius:3px; height:5px; overflow:hidden; }
+    .t5fill { height:100%; border-radius:3px; background:linear-gradient(90deg,var(--accent),var(--accent2)); transition:width .6s cubic-bezier(.22,1,.36,1); }
+    .t5i:first-child .t5fill { background:linear-gradient(90deg,var(--green),#16a34a); }
+    .t5p { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); width:40px; text-align:right; }
+
+    /* heatmap */
+    .heatmap { display:grid; grid-template-columns:repeat(9,1fr); gap:3px; }
+    .hm { aspect-ratio:1; border-radius:3px; background:var(--accent); position:relative; cursor:default; }
+    .hm:hover::after {
+      content:attr(data-tip); position:absolute; bottom:calc(100% + 5px); left:50%;
+      transform:translateX(-50%); background:var(--surface2); border:1px solid var(--border2);
+      border-radius:5px; padding:3px 7px; font-size:10px; white-space:nowrap; z-index:10;
+    }
+
+    /* input source tag */
+    .src-tag {
+      display:inline-flex; align-items:center; gap:4px;
+      background:rgba(6,182,212,.1); border:1px solid rgba(6,182,212,.2);
+      color:var(--cyan); border-radius:20px; font-size:10px; font-weight:600;
+      padding:2px 8px; margin-bottom:12px;
+    }
+
+    .toast {
+      position:fixed; bottom:20px; right:20px;
+      background:rgba(239,68,68,.12); border:1px solid var(--red);
+      border-radius:var(--r2); padding:10px 16px; font-size:12px; color:var(--red);
+      display:none; z-index:100; animation:fadeIn .3s ease;
+    }
+    @media(max-width:900px){
+      .app{grid-template-columns:1fr;}
+      aside{border-right:none;border-bottom:1px solid var(--border);}
+      .metric-grid{grid-template-columns:1fr 1fr;}
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+
+<!-- ══ HEADER ══════════════════════════════════════════════════════ -->
+<header>
+  <div class="logo-ring">🧠</div>
+  <div class="header-text">
+    <h1>IntentFormer — Interactive Test Environment</h1>
+    <p>Single-sample inference · XR Intent-Aware Framework · Phase 1</p>
+  </div>
+  <span class="badge">Apple MPS</span>
+</header>
+
+<!-- ══ SIDEBAR ═════════════════════════════════════════════════════ -->
+<aside>
+
+  <!-- Tab bar -->
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="switchTab('preset')">🎛 Preset</button>
+    <button class="tab-btn" onclick="switchTab('joints')">✋ Joints</button>
+    <button class="tab-btn" onclick="switchTab('file')">📂 File</button>
+    <button class="tab-btn" onclick="switchTab('raw')">{ } Raw</button>
+  </div>
+
+  <!-- ── Tab 1: Preset ──────────────────────────────────────────── -->
+  <div class="tab-panel active" id="tab-preset">
+
+    <div>
+      <p class="sec-label">Motion Preset</p>
+      <div class="callout" style="margin-bottom:10px;">
+        Choose a <b>motion type</b>. Each preset generates a realistic skeletal trajectory
+        for all 30 frames (21 joints × 2 hands, wrist-relative). The model receives
+        this as <b>hand_flat (30, 126)</b>.
+      </div>
+      <div class="preset-grid" id="presetGrid"></div>
+    </div>
+
+    <div class="sep"></div>
+
+    <div>
+      <p class="sec-label">Observation Parameters</p>
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div class="field">
+          <label>Observation Ratio &nbsp;<span style="font-size:10px;color:var(--muted)">fraction of action seen (0.10–0.50)</span></label>
+          <div class="val-row">
+            <input type="range" id="obsRatio" min="0.10" max="0.50" step="0.01" value="0.25" oninput="syncVal(this,'obsRatioVal')"/>
+            <span class="val-tag" id="obsRatioVal">0.25</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Window Size &nbsp;<span style="font-size:10px;color:var(--muted)">frames fed to model (10–60)</span></label>
+          <div class="val-row">
+            <input type="range" id="windowSize" min="10" max="60" step="1" value="30" oninput="syncVal(this,'windowSizeVal')"/>
+            <span class="val-tag" id="windowSizeVal">30</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Random Seed &nbsp;<span style="font-size:10px;color:var(--muted)">controls noise added to each preset</span></label>
+          <div class="val-row">
+            <input type="range" id="seed" min="0" max="9999" step="1" value="42" oninput="syncVal(this,'seedVal')"/>
+            <span class="val-tag" id="seedVal">42</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sep"></div>
+
+    <div>
+      <p class="sec-label">Action Segment &nbsp;<span style="font-size:9px;font-weight:400;color:var(--muted)">(for TTC calculation)</span></p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div class="field"><label>Start Frame</label><input type="number" id="startAct" value="20" min="0"/></div>
+        <div class="field"><label>End Frame</label><input type="number" id="endAct" value="80" min="1"/></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Tab 2: Joint Editor ────────────────────────────────────── -->
+  <div class="tab-panel" id="tab-joints">
+
+    <div class="callout">
+      Type <b>XYZ coordinates</b> for each of the <b>21 joints</b> per hand (wrist-relative, metres).
+      Joint 0 is the wrist — it should stay at <b>0, 0, 0</b>.
+      These values are repeated for all <b><span id="wsLabel">30</span> frames</b>.
+    </div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+      <div class="hand-tabs">
+        <button class="hand-tab-btn active" onclick="switchHand(0)">✋ Left Hand</button>
+        <button class="hand-tab-btn" onclick="switchHand(1)">🤚 Right Hand</button>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button class="small-btn" onclick="randomiseJoints()">🎲 Randomise</button>
+        <button class="small-btn" onclick="resetJoints()">↺ Reset</button>
+      </div>
+    </div>
+
+    <div style="overflow-x:auto;">
+      <table class="joint-table" id="jointTable">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding-left:8px;">Joint</th>
+            <th class="axis-x">X</th>
+            <th class="axis-y">Y</th>
+            <th class="axis-z">Z</th>
+          </tr>
+        </thead>
+        <tbody id="jointBody"></tbody>
+      </table>
+    </div>
+
+    <div class="sep"></div>
+
+    <!-- shared sliders for joint tab -->
+    <div>
+      <p class="sec-label">Observation Parameters</p>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div class="field">
+          <label>Observation Ratio</label>
+          <div class="val-row">
+            <input type="range" id="obsRatio2" min="0.10" max="0.50" step="0.01" value="0.25" oninput="syncRange2('obsRatio','obsRatioVal',this.value)"/>
+            <span class="val-tag" id="obsRatioVal2">0.25</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Window Size (frames — joints are repeated across all frames)</label>
+          <div class="val-row">
+            <input type="range" id="windowSize2" min="10" max="60" step="1" value="30" oninput="syncRange2('windowSize','windowSizeVal',this.value);document.getElementById('wsLabel').textContent=this.value"/>
+            <span class="val-tag" id="windowSizeVal2">30</span>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="field"><label>Start Frame</label><input type="number" id="startAct2" value="20" min="0" oninput="document.getElementById('startAct').value=this.value"/></div>
+          <div class="field"><label>End Frame</label><input type="number" id="endAct2" value="80" min="1" oninput="document.getElementById('endAct').value=this.value"/></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Tab 3: File Upload ─────────────────────────────────────── -->
+  <div class="tab-panel" id="tab-file">
+
+    <div class="callout">
+      Upload a <b>CSV or JSON</b> file containing hand joint data. The file should contain
+      <b>T rows × 126 columns</b> (flattened 2-hand, 21-joint, XYZ pose per frame).
+    </div>
+
+    <div>
+      <p class="sec-label">Expected File Formats</p>
+      <div style="display:flex;flex-direction:column;gap:8px;font-size:11px;color:var(--muted);">
+        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r2);padding:10px;">
+          <b style="color:var(--text);">CSV</b> — one row per frame, 126 comma-separated floats:<br/>
+          <code style="color:#a5b4fc;font-size:10px;">0.01,-0.02,0.03,0.01,…  ← frame 1 (126 values)</code><br/>
+          <code style="color:#a5b4fc;font-size:10px;">0.02,-0.01,0.04,0.02,…  ← frame 2</code>
+        </div>
+        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r2);padding:10px;">
+          <b style="color:var(--text);">JSON</b> — 2D array <code style="color:#a5b4fc">[[...], [...], ...]</code> shape (T, 126),
+          or flat 1D array of T×126 floats.
+        </div>
+      </div>
+    </div>
+
+    <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()" ondragover="e=>e.preventDefault()" ondrop="handleDrop(event)">
+      <div class="upload-icon">📂</div>
+      <p><strong>Click to choose</strong> or drag &amp; drop a file here</p>
+      <p style="margin-top:4px;font-size:10px;">Accepts .csv &nbsp;·&nbsp; .json &nbsp;·&nbsp; .txt</p>
+    </div>
+    <input type="file" id="fileInput" accept=".csv,.json,.txt" onchange="handleFile(event)"/>
+
+    <div id="filePreviewBox" style="display:none;">
+      <p class="sec-label">Loaded File</p>
+      <div class="json-preview" id="filePreview"></div>
+      <div style="margin-top:6px;font-size:11px;color:var(--green);" id="fileStats"></div>
+    </div>
+
+    <div class="sep"></div>
+
+    <!-- Optional obj RT -->
+    <div>
+      <p class="sec-label">Object Pose (optional — defaults to identity matrix)</p>
+      <div class="callout" style="margin-bottom:8px;font-size:10px;">
+        Upload or paste a flat array of <b>T × 16</b> floats for the 4×4 RT matrix.
+      </div>
+      <textarea class="json-area" id="fileObjRt" placeholder='Leave empty → identity matrix used automatically'></textarea>
+    </div>
+
+    <div class="sep"></div>
+
+    <div>
+      <p class="sec-label">Observation Parameters</p>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div class="field">
+          <label>Observation Ratio</label>
+          <div class="val-row">
+            <input type="range" id="obsRatio3" min="0.10" max="0.50" step="0.01" value="0.25" oninput="syncRange2('obsRatio','obsRatioVal',this.value)"/>
+            <span class="val-tag" id="obsRatioVal3">0.25</span>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="field"><label>Start Frame</label><input type="number" id="startAct3" value="20" min="0" oninput="document.getElementById('startAct').value=this.value"/></div>
+          <div class="field"><label>End Frame</label><input type="number" id="endAct3" value="80" min="1" oninput="document.getElementById('endAct').value=this.value"/></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Tab 4: Raw JSON ────────────────────────────────────────── -->
+  <div class="tab-panel" id="tab-raw">
+
+    <div class="callout">
+      Paste raw JSON arrays directly. Both fields are flat 1D arrays.
+      <b>hand_flat</b> must have <code>window_size × 126</code> values.
+      <b>obj_rt</b> must have <code>window_size × 16</code> values (or leave empty for an identity matrix).
+    </div>
+
+    <div class="field">
+      <label>hand_flat &nbsp;<span style="color:var(--muted);font-size:10px;">window_size × 126 floats (wrist-relative)</span></label>
+      <textarea class="json-area" id="rawHandFlat" placeholder='[0.01, -0.02, 0.03, …]  — paste your flat array here' style="height:110px;"></textarea>
+    </div>
+
+    <div class="field">
+      <label>obj_rt &nbsp;<span style="color:var(--muted);font-size:10px;">window_size × 16 floats (4×4 RT matrix)</span></label>
+      <textarea class="json-area" id="rawObjRt" placeholder='[1, 0, 0, 0, 0, 1, 0, …]  — identity matrix by default'></textarea>
+    </div>
+
+    <div class="sep"></div>
+
+    <div>
+      <p class="sec-label">Observation Parameters</p>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div class="field">
+          <label>Observation Ratio</label>
+          <div class="val-row">
+            <input type="range" id="obsRatio4" min="0.10" max="0.50" step="0.01" value="0.25" oninput="syncRange2('obsRatio','obsRatioVal',this.value)"/>
+            <span class="val-tag" id="obsRatioVal4">0.25</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Window Size</label>
+          <div class="val-row">
+            <input type="range" id="windowSize4" min="10" max="60" step="1" value="30" oninput="syncRange2('windowSize','windowSizeVal',this.value)"/>
+            <span class="val-tag" id="windowSizeVal4">30</span>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="field"><label>Start Frame</label><input type="number" id="startAct4" value="20" min="0" oninput="document.getElementById('startAct').value=this.value"/></div>
+          <div class="field"><label>End Frame</label><input type="number" id="endAct4" value="80" min="1" oninput="document.getElementById('endAct').value=this.value"/></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Sticky run bar ───────────────────────────────────────────── -->
+  <div class="run-bar" style="margin-top:auto;">
+    <button id="btnInfer" onclick="runInference()">
+      <div class="spinner" id="spinner"></div>
+      <span id="btnText">▶ Run Inference</span>
+    </button>
+    <p class="kbd">Shortcut: <kbd>⌘ Enter</kbd> &nbsp;·&nbsp; Input from: <b id="activeTabLabel" style="color:var(--accent)">Preset</b></p>
+  </div>
+
+</aside>
+
+<!-- ══ MAIN RESULTS ════════════════════════════════════════════════ -->
+<main id="mainPanel">
+  <div class="empty-state" id="emptyState">
+    <div class="empty-icon">🎯</div>
+    <h2>Ready for Inference</h2>
+    <p>Choose one of the <b>4 input methods</b> on the left, configure your parameters, then click <b>Run Inference</b>.</p>
+    <div class="method-chips">
+      <div class="method-chip">🎛 Preset Motion</div>
+      <div class="method-chip">✋ Joint Editor</div>
+      <div class="method-chip">📂 File Upload</div>
+      <div class="method-chip">{ } Raw JSON</div>
+    </div>
+  </div>
+</main>
+
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ─────────────────────────────────────────
+   Constants
+───────────────────────────────────────── */
+const JOINT_NAMES = [
+  'Wrist','Thumb-1','Thumb-2','Thumb-3','Thumb-tip',
+  'Index-1','Index-2','Index-3','Index-tip',
+  'Middle-1','Middle-2','Middle-3','Middle-tip',
+  'Ring-1','Ring-2','Ring-3','Ring-tip',
+  'Pinky-1','Pinky-2','Pinky-3','Pinky-tip',
+];
+
+/* ─────────────────────────────────────────
+   State
+───────────────────────────────────────── */
+let activePreset  = 'random';
+let activeTab     = 'preset';
+let activeHand    = 0;
+let actionNames   = [];
+let fileHandFlat  = null;   // loaded from file upload (flat array)
+// joint editor state: [hand][joint][axis] = float
+let jointState = [
+  Array.from({length:21}, () => [0,0,0]),
+  Array.from({length:21}, () => [0,0,0]),
+];
+
+/* ─────────────────────────────────────────
+   Boot
+───────────────────────────────────────── */
+async function boot() {
+  const presets = await fetch('/api/presets').then(r=>r.json());
+  const grid    = document.getElementById('presetGrid');
+  for (const [key, p] of Object.entries(presets)) {
+    const btn = document.createElement('button');
+    btn.className = 'preset-btn' + (key==='random'?' active':'');
+    btn.id = 'preset_'+key;
+    const [emoji, ...words] = p.label.split(' ');
+    btn.innerHTML = `<span class="emoji">${emoji}</span><span>${words.join(' ')}</span>`;
+    btn.onclick = () => selectPreset(key, p.obs_ratio);
+    grid.appendChild(btn);
+  }
+
+  actionNames = await fetch('/api/action_names').then(r=>r.json());
+  buildJointTable();
+
+  document.addEventListener('keydown', e => {
+    if ((e.metaKey||e.ctrlKey) && e.key==='Enter') runInference();
+  });
+
+  // drag-drop for upload zone
+  const zone = document.getElementById('uploadZone');
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+  zone.addEventListener('drop', handleDrop);
+}
+
+/* ─────────────────────────────────────────
+   Tabs
+───────────────────────────────────────── */
+const TAB_LABELS = {preset:'Preset', joints:'Joint Editor', file:'File Upload', raw:'Raw JSON'};
+function switchTab(name) {
+  activeTab = name;
+  document.querySelectorAll('.tab-btn').forEach((b,i) => {
+    b.classList.toggle('active', ['preset','joints','file','raw'][i]===name);
+  });
+  document.querySelectorAll('.tab-panel').forEach(p => {
+    p.classList.toggle('active', p.id==='tab-'+name);
+  });
+  document.getElementById('activeTabLabel').textContent = TAB_LABELS[name];
+}
+
+/* ─────────────────────────────────────────
+   Preset selector
+───────────────────────────────────────── */
+function selectPreset(key, obs) {
+  activePreset = key;
+  document.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('preset_'+key).classList.add('active');
+  const sl = document.getElementById('obsRatio');
+  sl.value = obs; syncVal(sl,'obsRatioVal');
+}
+
+/* ─────────────────────────────────────────
+   Slider sync helpers
+───────────────────────────────────────── */
+function syncVal(el, id) {
+  document.getElementById(id).textContent =
+    (el.id==='windowSize'||el.id==='seed') ? el.value : parseFloat(el.value).toFixed(2);
+}
+function syncRange2(masterId, masterValId, val) {
+  // sync all slave sliders back to master
+  const el = document.getElementById(masterId);
+  el.value = val;
+  syncVal(el, masterValId);
+  // sync all mirrored val tags
+  ['obsRatioVal2','obsRatioVal3','obsRatioVal4'].forEach(id => {
+    const el2 = document.getElementById(id);
+    if (el2) el2.textContent = parseFloat(val).toFixed(2);
+  });
+  ['windowSizeVal2','windowSizeVal4'].forEach(id => {
+    const el2 = document.getElementById(id);
+    if (el2) el2.textContent = val;
+  });
+  const wsL = document.getElementById('wsLabel');
+  if (wsL) wsL.textContent = document.getElementById('windowSize').value;
+}
+
+/* ─────────────────────────────────────────
+   Joint Editor
+───────────────────────────────────────── */
+function buildJointTable() {
+  const tbody = document.getElementById('jointBody');
+  tbody.innerHTML = '';
+  JOINT_NAMES.forEach((name, j) => {
+    const tr = document.createElement('tr');
+    const vals = jointState[activeHand][j];
+    const axes = ['x','y','z'];
+    tr.innerHTML = `<td class="joint-name">${j}. ${name}</td>` +
+      axes.map((ax,i) =>
+        `<td><input class="joint-input" type="number" step="0.01"
+           data-hand="${activeHand}" data-j="${j}" data-ax="${i}"
+           value="${vals[i].toFixed(3)}"
+           oninput="updateJoint(${activeHand},${j},${i},this.value)"
+           ${j===0?'disabled title="Wrist is always 0,0,0 (wrist-relative)"':''}
+         /></td>`
+      ).join('');
+    tbody.appendChild(tr);
+  });
+}
+function switchHand(h) {
+  activeHand = h;
+  document.querySelectorAll('.hand-tab-btn').forEach((b,i)=>b.classList.toggle('active',i===h));
+  buildJointTable();
+}
+function updateJoint(h, j, ax, val) {
+  jointState[h][j][ax] = parseFloat(val)||0;
+}
+function resetJoints() {
+  jointState[activeHand] = Array.from({length:21}, ()=>[0,0,0]);
+  buildJointTable();
+}
+function randomiseJoints() {
+  jointState[activeHand] = Array.from({length:21}, (_, j) =>
+    j===0 ? [0,0,0] : [(Math.random()-.5)*.2,(Math.random()-.5)*.2,(Math.random()-.5)*.1]
+  );
+  buildJointTable();
+}
+
+/** Convert joint editor state → hand_flat (T, 126) flat array.
+    We repeat the same pose for every frame (static pose across window). */
+function jointsToHandFlat(windowSize) {
+  const frame = [];
+  for (let h=0; h<2; h++) {
+    for (let j=0; j<21; j++) {
+      frame.push(...jointState[h][j]);
+    }
+  }
+  // repeat across window
+  const out = [];
+  for (let t=0; t<windowSize; t++) out.push(...frame);
+  return out;
+}
+
+/* ─────────────────────────────────────────
+   File Upload
+───────────────────────────────────────── */
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('uploadZone').classList.remove('drag');
+  const file = e.dataTransfer.files[0];
+  if (file) processFile(file);
+}
+function handleFile(e) { processFile(e.target.files[0]); }
+
+function processFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const raw = ev.target.result.trim();
+    try {
+      let data;
+      if (file.name.endsWith('.json')) {
+        data = JSON.parse(raw);
+        if (Array.isArray(data[0])) {
+          // 2D array → flatten
+          fileHandFlat = data.flat();
+        } else {
+          fileHandFlat = data;
+        }
+      } else {
+        // CSV or TXT: rows × columns
+        const rows = raw.split('\n').filter(l=>l.trim());
+        fileHandFlat = rows.flatMap(row => row.split(',').map(Number));
+      }
+      const nFrames = Math.floor(fileHandFlat.length / 126);
+      document.getElementById('filePreviewBox').style.display = '';
+      document.getElementById('filePreview').textContent = raw.slice(0,200) + (raw.length>200?'…':'');
+      document.getElementById('fileStats').textContent =
+        `✓ Loaded ${file.name} — ${fileHandFlat.length} values → ${nFrames} frame(s) × 126 features`;
+    } catch(err) {
+      showToast('Failed to parse file: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+/* ─────────────────────────────────────────
+   Build request body
+───────────────────────────────────────── */
+function buildBody() {
+  const obsRatio   = parseFloat(document.getElementById('obsRatio').value);
+  const windowSize = parseInt(document.getElementById('windowSize').value);
+  const seed       = parseInt(document.getElementById('seed').value);
+  const startAct   = parseInt(document.getElementById('startAct').value);
+  const endAct     = parseInt(document.getElementById('endAct').value);
+
+  const base = { obs_ratio:obsRatio, window_size:windowSize, seed,
+                 start_act:startAct, end_act:endAct };
+
+  if (activeTab === 'preset') {
+    return { ...base, preset: activePreset, inputSource:'preset:'+activePreset };
+  }
+
+  if (activeTab === 'joints') {
+    const hf = jointsToHandFlat(windowSize);
+    return { ...base, preset:'random', hand_flat: hf, inputSource:'Joint Editor' };
+  }
+
+  if (activeTab === 'file') {
+    if (!fileHandFlat) { showToast('No file loaded yet — upload a CSV or JSON first.'); return null; }
+    const hf = fileHandFlat.slice(0, windowSize*126);
+    // pad if short
+    while (hf.length < windowSize*126) hf.push(0);
+    let obj = null;
+    const orRaw = document.getElementById('fileObjRt').value.trim();
+    if (orRaw) { try{obj=JSON.parse(orRaw);}catch{} }
+    const body = { ...base, preset:'random', hand_flat:hf, inputSource:'File Upload' };
+    if (obj) body.obj_rt = obj;
+    return body;
+  }
+
+  if (activeTab === 'raw') {
+    const hfRaw = document.getElementById('rawHandFlat').value.trim();
+    const orRaw = document.getElementById('rawObjRt').value.trim();
+    let hf = null, obj = null;
+    try { if(hfRaw) hf  = JSON.parse(hfRaw); } catch(e){ showToast('hand_flat JSON error: '+e.message); return null; }
+    try { if(orRaw) obj = JSON.parse(orRaw);  } catch(e){ showToast('obj_rt JSON error: '+e.message);    return null; }
+    const body = { ...base, preset:'random', inputSource:'Raw JSON' };
+    if (hf)  body.hand_flat = hf;
+    if (obj) body.obj_rt    = obj;
+    return body;
+  }
+
+  return base;
+}
+
+/* ─────────────────────────────────────────
+   Run Inference
+───────────────────────────────────────── */
+async function runInference() {
+  const body = buildBody();
+  if (!body) return;
+
+  const btn = document.getElementById('btnInfer');
+  btn.classList.add('loading');
+  document.getElementById('spinner').style.display='block';
+  document.getElementById('btnText').textContent='Running…';
+
+  try {
+    const res = await fetch('/api/infer', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error('Server error '+res.status);
+    const data = await res.json();
+    data.inputSource = body.inputSource || 'Unknown';
+    renderResults(data);
+  } catch(e) { showToast('Inference failed: '+e.message); }
+
+  btn.classList.remove('loading');
+  document.getElementById('spinner').style.display='none';
+  document.getElementById('btnText').textContent='▶ Run Inference';
+}
+
+/* ─────────────────────────────────────────
+   Render Results
+───────────────────────────────────────── */
+function renderResults(d) {
+  document.getElementById('emptyState')?.remove();
+  const main = document.getElementById('mainPanel');
+  const pct  = Math.round(d.confidence*100);
+  const cc   = d.confidence>=.65?'high':d.confidence>=.35?'mid':'low';
+
+  main.innerHTML = `
+    <div class="src-tag">📥 Input: ${d.inputSource} &nbsp;·&nbsp; ${d.window_size} frames &nbsp;·&nbsp; obs_ratio ${d.obs_ratio.toFixed(2)}</div>
+
+    <div class="card">
+      <p class="card-title">Prediction</p>
+      <div class="hero-pred">
+        <div class="pred-ring ${d.ghost_triggered?'ghost':''}">${d.ghost_triggered?'👻':'🧠'}</div>
+        <div>
+          <div class="pred-name">${d.pred_name}</div>
+          <div class="pred-sub">Class ${d.pred_class} of 36 &nbsp;·&nbsp; window ${d.window_size} frames</div>
+        </div>
+        <div class="conf-badge ${cc}">${pct}%</div>
+      </div>
+    </div>
+
+    <div class="ghost-banner ${d.ghost_triggered?'on':'off'}">
+      <div class="gdot"></div>
+      ${d.ghost_triggered
+        ? `👻 Ghost Hand TRIGGERED — confidence ${pct}% ≥ 65% threshold`
+        : `Ghost Hand dormant — confidence ${pct}% < 65% (threshold not met)`}
+    </div>
+
+    <div class="card">
+      <p class="card-title">Key Metrics</p>
+      <div class="metric-grid">
+        <div class="mcard"><div class="mv">${pct}<span style="font-size:13px">%</span></div><div class="ml">Confidence</div></div>
+        <div class="mcard"><div class="mv">${d.ttc_seconds.toFixed(2)}<span style="font-size:13px">s</span></div><div class="ml">Time-to-Contact</div></div>
+        <div class="mcard"><div class="mv">${Math.round(d.obs_ratio*100)}<span style="font-size:13px">%</span></div><div class="ml">Obs. Ratio</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <p class="card-title">Top-5 Predictions</p>
+      <div class="top5" id="top5List"></div>
+    </div>
+
+    <div class="card">
+      <p class="card-title">All 36 Class Probabilities (hover for name)</p>
+      <div class="heatmap" id="heatmap"></div>
+      <p style="font-size:10px;color:var(--muted);margin-top:8px;">Brighter cell = higher probability.</p>
+    </div>
+  `;
+
+  const t5 = document.getElementById('top5List');
+  const mx = d.top5[0].prob;
+  d.top5.forEach((item,i) => {
+    const pct2 = mx>0?(item.prob/mx*100):0;
+    const el = document.createElement('div');
+    el.className='t5i'; el.style.animationDelay=`${i*60}ms`;
+    el.innerHTML=`<span class="t5r">#${item.rank}</span>
+      <div class="t5w">
+        <div class="t5l">${item.class_name}</div>
+        <div class="t5bg"><div class="t5fill" id="bar${i}" style="width:0%"></div></div>
+      </div>
+      <span class="t5p">${(item.prob*100).toFixed(1)}%</span>`;
+    t5.appendChild(el);
+    setTimeout(()=>{ document.getElementById(`bar${i}`).style.width=pct2+'%'; }, 50+i*60);
+  });
+
+  const hm=document.getElementById('heatmap');
+  const mx2=Math.max(...d.all_probs)||1;
+  d.all_probs.forEach((p,idx)=>{
+    const c=document.createElement('div');
+    c.className='hm';
+    c.style.opacity=String(.06+.94*(p/mx2));
+    c.setAttribute('data-tip',`#${idx}: ${actionNames[idx]||'—'} (${(p*100).toFixed(1)}%)`);
+    hm.appendChild(c);
+  });
+}
+
+/* ─────────────────────────────────────────
+   Toast
+───────────────────────────────────────── */
+function showToast(msg) {
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.style.display='block';
+  setTimeout(()=>t.style.display='none',4000);
+}
+
+boot();
+</script>
+</body>
+</html>
