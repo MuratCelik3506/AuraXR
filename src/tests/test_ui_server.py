@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent   # Phase1/
 sys.path.insert(0, str(ROOT))
 
 from src.models.intent_former import IntentFormer
-from src.data.h2o_dataset import NUM_CLASSES
+from src.data.h2o_dataset import NUM_CLASSES, H2ODataset
 from src.evaluate import compute_ttc
 
 # ── H2O action-class names (36 verb-object combinations) ────────────────────
@@ -152,10 +152,22 @@ _model:  IntentFormer | None = None
 _device: torch.device         = torch.device("cpu")
 
 
-def get_model() -> IntentFormer:
+def get_model(ckpt_params: dict = None) -> IntentFormer:
     global _model
     if _model is None:
-        _model = IntentFormer(num_classes=NUM_CLASSES)
+        if ckpt_params:
+            # Dynamically use checkpoint parameters
+            _model = IntentFormer(
+                num_classes     = ckpt_params.get("num_classes", NUM_CLASSES),
+                d_model         = ckpt_params.get("d_model", 128),
+                nhead           = ckpt_params.get("nhead", 4),
+                num_layers      = ckpt_params.get("num_layers", 4),
+                dim_feedforward = ckpt_params.get("dim_ff", 512),
+                window_size     = ckpt_params.get("window_size", 30)
+            )
+        else:
+            _model = IntentFormer(num_classes=NUM_CLASSES)
+        
         _model.eval()
         _model.to(_device)
     return _model
@@ -177,6 +189,83 @@ def api_presets():
 def api_action_names():
     return jsonify(ACTION_NAMES)
 
+
+_h2o_ds = None
+
+def get_h2o_dataset():
+    global _h2o_ds
+    if _h2o_ds is None:
+        try:
+            _h2o_ds = H2ODataset("data/h2o", split="val", window_size=30)
+            if len(_h2o_ds.samples) == 0:
+                _h2o_ds = H2ODataset("data/h2o", split="train", window_size=30)
+        except Exception:
+            _h2o_ds = None
+    return _h2o_ds
+
+@app.route("/api/real_data", methods=["GET"])
+def api_real_data():
+    ds = get_h2o_dataset()
+    if ds is None or len(ds.samples) == 0:
+        return jsonify([])
+    
+    seen = set()
+    out = []
+    for i, s in enumerate(ds.samples):
+        key = (s["rel_path"], s["start_act"], s["end_act"])
+        if key not in seen:
+            seen.add(key)
+            out.append({
+                "idx": i,
+                "path": s["rel_path"],
+                "start_act": s["start_act"],
+                "end_act": s["end_act"],
+                "label": int(s["label"]),
+                "action_name": ACTION_NAMES[int(s["label"])],
+            })
+            if len(out) >= 100:
+                break
+    return jsonify(out)
+
+@app.route("/api/real_data/<int:idx>", methods=["GET"])
+def api_get_real_data(idx):
+    ds = get_h2o_dataset()
+    if ds is None or idx < 0 or idx >= len(ds.samples):
+        return jsonify({"error": "Invalid index"}), 404
+        
+    meta = ds.samples[idx]
+    seq_data = ds._get_sequence(meta["rel_path"])
+    if seq_data is None:
+         return jsonify({"error": "Failed to load sequence"}), 404
+         
+    s = meta["start_act"]
+    e = meta["end_act"]
+    num_frames = seq_data["num_frames"]
+    s = max(0, min(s, num_frames - 1))
+    e = max(0, min(e, num_frames - 1))
+    
+    if e < s:
+        e = s
+    
+    hand_poses = seq_data["hand_poses"][s:e+1]
+    raw_hand_poses = seq_data.get("raw_hand_poses", hand_poses)[s:e+1]
+    obj_poses = seq_data["obj_poses_rt"][s:e+1]
+    
+    T = hand_poses.shape[0]
+    hand_flat = hand_poses.reshape(T, 126).tolist()
+    raw_hand_flat = raw_hand_poses.reshape(T, 126).tolist()
+    obj_flat = obj_poses.tolist()
+    
+    return jsonify({
+        "hand_flat": hand_flat,
+        "raw_hand_flat": raw_hand_flat,
+        "obj_rt": obj_flat,
+        "true_label": int(meta["label"]),
+        "action_name": ACTION_NAMES[int(meta["label"])],
+        "T": T,
+        "start_act": s,
+        "end_act": e
+    })
 
 @app.route("/api/infer", methods=["POST"])
 def api_infer():
@@ -288,11 +377,26 @@ def main():
     if args.checkpoint and Path(args.checkpoint).exists():
         ckpt = torch.load(args.checkpoint, map_location=_device)
         state = ckpt.get("model", ckpt)
-        m = get_model()
+        
+        # Determine model params from checkpoint or CLI-style overrides
+        # For our specific combined_best run: d_model=256, nhead=8, num_layers=6, dim_ff=1024
+        # We try to infer or at least allow larger models to load.
+        ckpt_params = {
+            "num_classes": ckpt.get("num_classes", NUM_CLASSES),
+            # Default to the scaled-up params we just used if it's the combined_best path
+            "d_model": 256 if "combined_best" in args.checkpoint else 128,
+            "nhead": 8 if "combined_best" in args.checkpoint else 4,
+            "num_layers": 6 if "combined_best" in args.checkpoint else 4,
+            "dim_ff": 1024 if "combined_best" in args.checkpoint else 512,
+        }
+        
+        m = get_model(ckpt_params)
         m.load_state_dict(state)
         print(f"[server] Loaded checkpoint: {args.checkpoint}")
+        print(f"[server] Model Config: d_model={ckpt_params['d_model']} classes={ckpt_params['num_classes']}")
     else:
         print("[server] Using random (untrained) model weights.")
+        get_model() # Init default model
         print("[server] Pass --checkpoint checkpoints/best_model.pt for trained predictions.")
 
     print(f"\n[server] ✓  Open your browser:  http://{args.host}:{args.port}\n")

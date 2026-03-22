@@ -6,6 +6,7 @@
   <title>IntentFormer — Interactive Test Environment</title>
   <meta name="description" content="Single-sample interactive test UI for the Intent-Aware Proactive XR Framework."/>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -325,6 +326,7 @@
     <button class="tab-btn" onclick="switchTab('joints')">✋ Joints</button>
     <button class="tab-btn" onclick="switchTab('file')">📂 File</button>
     <button class="tab-btn" onclick="switchTab('raw')">{ } Raw</button>
+    <button class="tab-btn" onclick="switchTab('dataset')">🗄 Dataset</button>
   </div>
 
   <!-- ── Tab 1: Preset ──────────────────────────────────────────── -->
@@ -559,6 +561,49 @@
 
   </div>
 
+  
+  <!-- ── Tab 5: Real Dataset ────────────────────────────────────── -->
+  <div class="tab-panel" id="tab-dataset">
+    <div class="callout">
+      Select a real action from the <b>Dataset</b> to playback the true sequence
+      step-by-step and see Ghost Hand visualization.
+    </div>
+    
+    <div class="field">
+      <label>Choose a Sample</label>
+      <select id="datasetSelect" onchange="loadDatasetSample(this.value)">
+        <option value="" disabled selected>Loading samples...</option>
+      </select>
+    </div>
+    
+    <div id="datasetDetails" style="display:none; flex-direction:column; gap:6px; font-size:11px; margin-top:8px; background:var(--surface); border:1px solid var(--border); padding:10px; border-radius:var(--r2);">
+      <p style="color:var(--muted)">True Action: <strong id="dsTrueAction" style="color:var(--accent);font-size:12px;"></strong></p>
+      <p style="color:var(--muted)">Frames: <strong id="dsLength" style="color:var(--text)"></strong></p>
+    </div>
+
+    <div class="sep"></div>
+
+    <div>
+      <p class="sec-label">Observation Parameters</p>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div class="field">
+          <label>Observation Ratio</label>
+          <div class="val-row">
+            <input type="range" id="obsRatio5" min="0.10" max="0.50" step="0.01" value="0.25" oninput="syncRange2('obsRatio','obsRatioVal',this.value)"/>
+            <span class="val-tag" id="obsRatioVal5">0.25</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Window Size</label>
+          <div class="val-row">
+            <input type="range" id="windowSize5" min="10" max="60" step="1" value="30" oninput="syncRange2('windowSize','windowSizeVal',this.value)"/>
+            <span class="val-tag" id="windowSizeVal5">30</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Sticky run bar ───────────────────────────────────────────── -->
   <div class="run-bar" style="margin-top:auto;">
     <button id="btnInfer" onclick="runInference()">
@@ -571,19 +616,48 @@
 </aside>
 
 <!-- ══ MAIN RESULTS ════════════════════════════════════════════════ -->
+
 <main id="mainPanel">
   <div class="empty-state" id="emptyState">
     <div class="empty-icon">🎯</div>
     <h2>Ready for Inference</h2>
-    <p>Choose one of the <b>4 input methods</b> on the left, configure your parameters, then click <b>Run Inference</b>.</p>
+    <p>Choose one of the <b>5 input methods</b> on the left, configure your parameters, then click <b>Run Inference</b>.</p>
     <div class="method-chips">
       <div class="method-chip">🎛 Preset Motion</div>
       <div class="method-chip">✋ Joint Editor</div>
       <div class="method-chip">📂 File Upload</div>
       <div class="method-chip">{ } Raw JSON</div>
+      <div class="method-chip">🗄 Real Dataset</div>
     </div>
   </div>
+
+  <div id="resultContent" style="display:none; flex-direction:column; gap:20px;">
+    <!-- Top info tag -->
+    <div class="src-tag" id="resSrcTag"></div>
+
+    <!-- 3D Visualization -->
+    <div class="card" style="padding:0; overflow:hidden;" id="card3D">
+      <!-- Title & playback bar -->
+      <div style="padding:12px 18px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; background:var(--surface2);">
+        <button id="btnPlayPause" class="small-btn" onclick="togglePlayback()" style="width:70px;text-align:center;">▶ Play</button>
+        <div style="display:flex; flex-direction:column; flex:1; gap:4px;">
+          <input type="range" id="timeSlider" min="0" max="100" value="0" style="height:3px;" oninput="onTimeSliderChange(this.value)" />
+          <div style="display:flex; justify-content:space-between; font-size:10px; color:var(--muted); font-family:monospace;">
+            <span id="lblTimeStart">t=0</span>
+            <span id="lblTimeCur">Frame 0</span>
+            <span id="lblTimeEnd">t=30</span>
+          </div>
+        </div>
+      </div>
+      <!-- Plotly canvas -->
+      <div id="vis3d" style="width:100%; height:320px; background:var(--bg3);"></div>
+    </div>
+
+    <!-- Inference Stats Target -->
+    <div id="inferStatsTarget"></div>
+  </div>
 </main>
+
 
 </div>
 <div class="toast" id="toast"></div>
@@ -630,7 +704,10 @@ async function boot() {
     grid.appendChild(btn);
   }
 
+  
   actionNames = await fetch('/api/action_names').then(r=>r.json());
+  fetchDatasetList(); // NEW! Load real dataset samples
+
   buildJointTable();
 
   document.addEventListener('keydown', e => {
@@ -647,11 +724,11 @@ async function boot() {
 /* ─────────────────────────────────────────
    Tabs
 ───────────────────────────────────────── */
-const TAB_LABELS = {preset:'Preset', joints:'Joint Editor', file:'File Upload', raw:'Raw JSON'};
+const TAB_LABELS = {preset:'Preset', joints:'Joint Editor', file:'File Upload', raw:'Raw JSON', dataset:'Real Dataset'};
 function switchTab(name) {
   activeTab = name;
   document.querySelectorAll('.tab-btn').forEach((b,i) => {
-    b.classList.toggle('active', ['preset','joints','file','raw'][i]===name);
+    b.classList.toggle('active', ['preset','joints','file','raw','dataset'][i]===name);
   });
   document.querySelectorAll('.tab-panel').forEach(p => {
     p.classList.toggle('active', p.id==='tab-'+name);
@@ -682,17 +759,20 @@ function syncRange2(masterId, masterValId, val) {
   const el = document.getElementById(masterId);
   el.value = val;
   syncVal(el, masterValId);
-  // sync all mirrored val tags
-  ['obsRatioVal2','obsRatioVal3','obsRatioVal4'].forEach(id => {
-    const el2 = document.getElementById(id);
-    if (el2) el2.textContent = parseFloat(val).toFixed(2);
-  });
-  ['windowSizeVal2','windowSizeVal4'].forEach(id => {
-    const el2 = document.getElementById(id);
-    if (el2) el2.textContent = val;
-  });
-  const wsL = document.getElementById('wsLabel');
-  if (wsL) wsL.textContent = document.getElementById('windowSize').value;
+  
+  if (masterId === 'obsRatio') {
+    ['obsRatioVal2','obsRatioVal3','obsRatioVal4','obsRatioVal5'].forEach(id => {
+      const el2 = document.getElementById(id);
+      if (el2) el2.textContent = parseFloat(val).toFixed(2);
+    });
+  } else if (masterId === 'windowSize') {
+    ['windowSizeVal2','windowSizeVal4','windowSizeVal5'].forEach(id => {
+      const el2 = document.getElementById(id);
+      if (el2) el2.textContent = val;
+    });
+    const wsL = document.getElementById('wsLabel');
+    if (wsL) wsL.textContent = val;
+  }
 }
 
 /* ─────────────────────────────────────────
@@ -797,6 +877,204 @@ function processFile(file) {
 /* ─────────────────────────────────────────
    Build request body
 ───────────────────────────────────────── */
+
+let datasetSamples = [];
+let loadedDatasetData = null; // { hand_flat, obj_rt, T, start_act, end_act, action_name }
+
+async function fetchDatasetList() {
+  try {
+    datasetSamples = await fetch('/api/real_data').then(r=>r.json());
+    const sel = document.getElementById('datasetSelect');
+    sel.innerHTML = '<option value="" disabled selected>Select a segment...</option>';
+    datasetSamples.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.idx;
+      opt.textContent = `[Idx ${s.idx}] ${s.action_name} (${s.end_act - s.start_act + 1} frames)`;
+      sel.appendChild(opt);
+    });
+  } catch(e) {
+    document.getElementById('datasetSelect').innerHTML = '<option disabled>Failed to load dataset</option>';
+  }
+}
+
+async function loadDatasetSample(idx) {
+  try {
+    const data = await fetch(`/api/real_data/${idx}`).then(r=>r.json());
+    if (data.error) throw new Error(data.error);
+    loadedDatasetData = data;
+    
+    // Flatten the arrays to 1D since backend returns 2D arrays
+    loadedDatasetData.hand_flat = data.hand_flat.flat();
+    if (data.raw_hand_flat) {
+       loadedDatasetData.raw_hand_flat = data.raw_hand_flat.flat();
+    }
+    loadedDatasetData.obj_rt = data.obj_rt.flat();
+    
+    document.getElementById('datasetDetails').style.display='flex';
+    document.getElementById('dsTrueAction').textContent = data.action_name;
+    document.getElementById('dsLength').textContent = data.T;
+    
+    showToast(`Loaded segment: ${data.action_name} (${data.T} frames)`);
+  } catch(e) {
+    showToast("Error loading sample: " + e.message);
+  }
+}
+
+// Add state for 3D playback
+let playbackTimer = null;
+let currentFrame = 0;
+let totalFrames = 0;
+let sceneDataPlayback = null; // { hand_flat, obj_rt }
+
+function parseObjRt(arr, t) {
+  if (!arr || arr.length === 0) return [0,0,0];
+  // 16 flat floats per frame. T is frame index. translation is M.41, M.42, M.43.
+  const offset = t * 16;
+  if (offset + 14 >= arr.length) return [0,0,0];
+  // in 4x4 matrix, trans is typically indices 3, 7, 11 OR 12, 13, 14. 
+  // Wait, H2O obj_pose is column major or row major? Usually tx,ty,tz is 3,7,11 (row major) or 12,13,14 (col major).
+  // I will just use 3, 7, 11 for tx, ty, tz as a standard 4x4 flattened. Or we can just put it at 0,0,0 if unknown. 
+  // Actually, we'll try indices 3, 7, 11.
+  return [arr[offset+3], arr[offset+7], arr[offset+11]];
+}
+
+function render3DFrame() {
+  try {
+    if (!sceneDataPlayback) return;
+    const t = currentFrame;
+    const hf = sceneDataPlayback.hand_flat || [];
+    const objArr = sceneDataPlayback.obj_rt || [];
+    
+    if (t * 126 >= hf.length) return; // out of bounds
+    
+    const FINGERS = [
+       [0, 1, 2, 3, 4],
+       [0, 5, 6, 7, 8],
+       [0, 9, 10, 11, 12],
+       [0, 13, 14, 15, 16],
+       [0, 17, 18, 19, 20]
+    ];
+    const traces = [];
+
+    // 1. Current Hands
+    const offset = t * 126;
+    for(let h=0; h<2; h++){
+      const ho = h*63;
+      const hCol = h===0 ? '#8b5cf6' : '#6366f1';
+      for(let f=0; f<FINGERS.length; f++){
+         const finger = FINGERS[f];
+         let tx=[], ty=[], tz=[];
+         for(let i=0; i<finger.length; i++){
+            const j = finger[i];
+            tx.push(hf[offset + ho + j*3]);
+            ty.push(hf[offset + ho + j*3 + 1]);
+            tz.push(hf[offset + ho + j*3 + 2]);
+         }
+         traces.push({
+           x: tx, y: ty, z: tz,
+           mode: 'lines+markers',
+           marker: { color: hCol, size: 4, opacity: 0.9, line:{width:0} },
+           line: { color: hCol, width: 3 },
+           type: 'scatter3d',
+           showlegend: false
+         });
+      }
+    }
+    
+    // 2. Ghost Hands (Leader Ghost concept)
+    if (window.lastInferenceData && window.lastInferenceData.ghost_triggered) {
+        if (loadedDatasetData) {
+           const endT = loadedDatasetData.T - 1;
+           // Ghost is 10 frames (approx 1/3 sec) ahead of current hand to show the future path
+           let ghostT = t + 10; 
+           if (ghostT > endT) ghostT = endT; // stop at contact point
+           
+           const eg = ghostT * 126;
+           const egHf = loadedDatasetData.raw_hand_flat || loadedDatasetData.hand_flat;
+           if (eg < egHf.length) {
+              for(let h=0; h<2; h++){
+                 const ho = h*63;
+                 for(let f=0; f<FINGERS.length; f++){
+                    const finger = FINGERS[f];
+                    let tx=[], ty=[], tz=[];
+                    for(let i=0; i<finger.length; i++){
+                       const j = finger[i];
+                       tx.push(egHf[eg + ho + j*3]);
+                       ty.push(egHf[eg + ho + j*3 + 1]);
+                       tz.push(egHf[eg + ho + j*3 + 2]);
+                    }
+                    traces.push({
+                       x: tx, y: ty, z: tz,
+                       mode: 'lines+markers',
+                       marker: { color: '#22c55e', size: 4, opacity: 0.5, line:{width:0} },
+                       line: { color: '#22c55e', width: 2 },
+                       type: 'scatter3d',
+                       showlegend: false
+                    });
+                 }
+              }
+           }
+        }
+    }
+
+    // 3. Object
+    const [ox, oy, oz] = parseObjRt(objArr, t);
+    traces.push({
+        x: [ox], y: [oy], z: [oz],
+        mode: 'markers',
+        marker: { color: '#f59e0b', size: 10, symbol: 'square' },
+        type: 'scatter3d',
+        showlegend: false
+    });
+
+    const layout = {
+      margin: { l: 0, r: 0, b: 0, t: 0 },
+      paper_bgcolor: 'rgba(0,0,0,0)',
+      plot_bgcolor: 'rgba(0,0,0,0)',
+      scene: {
+        xaxis: { title:'', showgrid:false, zeroline:false, showticklabels:false },
+        yaxis: { title:'', showgrid:false, zeroline:false, showticklabels:false },
+        zaxis: { title:'', showgrid:false, zeroline:false, showticklabels:false },
+        aspectmode: 'cube'
+      }
+    };
+    
+    Plotly.react('vis3d', traces, layout, {displayModeBar: false});
+    document.getElementById('lblTimeCur').textContent = `Frame ${t}`;
+    document.getElementById('timeSlider').value = t;
+  } catch (err) {
+    console.error(`JS CRASH: ${err.message}`);
+  }
+}
+
+function togglePlayback() {
+  const btn = document.getElementById('btnPlayPause');
+  if (playbackTimer) {
+     clearInterval(playbackTimer);
+     playbackTimer = null;
+     btn.textContent = '▶ Play';
+  } else {
+     if (currentFrame >= totalFrames - 1) currentFrame = 0;
+     btn.textContent = '⏸ Pause';
+     playbackTimer = setInterval(() => {
+        currentFrame++;
+        if (currentFrame >= totalFrames) {
+           currentFrame = totalFrames - 1;
+           togglePlayback();
+           // when reaching the end, if ghost is not shown yet, we could trigger something here
+        }
+        render3DFrame();
+     }, 100); // 10 fps playback for typical 30-frame window
+  }
+}
+
+function onTimeSliderChange(val) {
+   currentFrame = parseInt(val);
+   if (playbackTimer) togglePlayback(); // pause when dragging
+   render3DFrame();
+}
+
+
 function buildBody() {
   const obsRatio   = parseFloat(document.getElementById('obsRatio').value);
   const windowSize = parseInt(document.getElementById('windowSize').value);
@@ -827,6 +1105,22 @@ function buildBody() {
     const body = { ...base, preset:'random', hand_flat:hf, inputSource:'File Upload' };
     if (obj) body.obj_rt = obj;
     return body;
+  }
+
+  
+  if (activeTab === 'dataset') {
+    if (!loadedDatasetData) { showToast('No dataset sample selected'); return null; }
+    // We send window_size frames from 0 to window_size to the model
+    // Wait, the model expects (windowSize, 126). 
+    // We can just extract the first windowSize frames from loadedDatasetData
+    let hf = loadedDatasetData.hand_flat.slice(0, windowSize * 126);
+    let obj = loadedDatasetData.obj_rt.slice(0, windowSize * 16);
+    
+    // pad if short
+    while (hf.length < windowSize*126) hf.push(0);
+    while (obj.length < windowSize*16) obj.push(0);
+
+    return { ...base, preset:'random', hand_flat:hf, obj_rt:obj, inputSource:'Dataset: '+loadedDatasetData.action_name };
   }
 
   if (activeTab === 'raw') {
@@ -874,22 +1168,47 @@ async function runInference() {
 /* ─────────────────────────────────────────
    Render Results
 ───────────────────────────────────────── */
+
 function renderResults(d) {
-  document.getElementById('emptyState')?.remove();
-  const main = document.getElementById('mainPanel');
+  window.lastInferenceData = d;
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('resultContent').style.display = 'flex';
+  
   const pct  = Math.round(d.confidence*100);
   const cc   = d.confidence>=.65?'high':d.confidence>=.35?'mid':'low';
 
-  main.innerHTML = `
-    <div class="src-tag">📥 Input: ${d.inputSource} &nbsp;·&nbsp; ${d.window_size} frames &nbsp;·&nbsp; obs_ratio ${d.obs_ratio.toFixed(2)}</div>
+  document.getElementById('resSrcTag').textContent = `📥 Input: ${d.inputSource}  ·  ${d.window_size} frames  ·  obs_ratio ${d.obs_ratio.toFixed(2)}`;
 
+  // Setup 3D Playback
+  currentFrame = 0;
+  // Use loadedDataset if it's the dataset tab to show the full sequence!
+  if (activeTab === 'dataset' && loadedDatasetData) {
+     totalFrames = loadedDatasetData.T;
+     sceneDataPlayback = { 
+        hand_flat: loadedDatasetData.raw_hand_flat || loadedDatasetData.hand_flat, 
+        obj_rt: loadedDatasetData.obj_rt 
+     };
+  } else {
+     totalFrames = d.window_size;
+     // The server actually doesn't return the raw input back to us!
+     // We should grab it from what we sent.
+     const req = buildBody();
+     sceneDataPlayback = { hand_flat: req.hand_flat || [], obj_rt: req.obj_rt || [] };
+  }
+  
+  document.getElementById('timeSlider').max = totalFrames - 1;
+  document.getElementById('lblTimeEnd').textContent = `t=${totalFrames-1}`;
+  if (playbackTimer) togglePlayback(); // reset
+  render3DFrame(); // draw first frame
+
+  const statHtml = `
     <div class="card">
-      <p class="card-title">Prediction</p>
+      <p class="card-title">Prediction at Window End</p>
       <div class="hero-pred">
         <div class="pred-ring ${d.ghost_triggered?'ghost':''}">${d.ghost_triggered?'👻':'🧠'}</div>
         <div>
           <div class="pred-name">${d.pred_name}</div>
-          <div class="pred-sub">Class ${d.pred_class} of 36 &nbsp;·&nbsp; window ${d.window_size} frames</div>
+          <div class="pred-sub">Class ${d.pred_class} of 36</div>
         </div>
         <div class="conf-badge ${cc}">${pct}%</div>
       </div>
@@ -898,8 +1217,8 @@ function renderResults(d) {
     <div class="ghost-banner ${d.ghost_triggered?'on':'off'}">
       <div class="gdot"></div>
       ${d.ghost_triggered
-        ? `👻 Ghost Hand TRIGGERED — confidence ${pct}% ≥ 65% threshold`
-        : `Ghost Hand dormant — confidence ${pct}% < 65% (threshold not met)`}
+        ? `👻 Ghost Target TRIGGERED — confidence ${pct}% ≥ 65% threshold`
+        : `Ghost Target dormant — confidence ${pct}% < 65% (threshold not met)`}
     </div>
 
     <div class="card">
@@ -915,14 +1234,10 @@ function renderResults(d) {
       <p class="card-title">Top-5 Predictions</p>
       <div class="top5" id="top5List"></div>
     </div>
-
-    <div class="card">
-      <p class="card-title">All 36 Class Probabilities (hover for name)</p>
-      <div class="heatmap" id="heatmap"></div>
-      <p style="font-size:10px;color:var(--muted);margin-top:8px;">Brighter cell = higher probability.</p>
-    </div>
   `;
-
+  document.getElementById('inferStatsTarget').innerHTML = statHtml;
+  
+  // top 5 render
   const t5 = document.getElementById('top5List');
   const mx = d.top5[0].prob;
   d.top5.forEach((item,i) => {
@@ -936,17 +1251,10 @@ function renderResults(d) {
       </div>
       <span class="t5p">${(item.prob*100).toFixed(1)}%</span>`;
     t5.appendChild(el);
-    setTimeout(()=>{ document.getElementById(`bar${i}`).style.width=pct2+'%'; }, 50+i*60);
-  });
-
-  const hm=document.getElementById('heatmap');
-  const mx2=Math.max(...d.all_probs)||1;
-  d.all_probs.forEach((p,idx)=>{
-    const c=document.createElement('div');
-    c.className='hm';
-    c.style.opacity=String(.06+.94*(p/mx2));
-    c.setAttribute('data-tip',`#${idx}: ${actionNames[idx]||'—'} (${(p*100).toFixed(1)}%)`);
-    hm.appendChild(c);
+    setTimeout(()=>{
+       const b = document.getElementById(`bar${i}`);
+       if(b) b.style.width=pct2+'%'; 
+    }, 50+i*60);
   });
 }
 

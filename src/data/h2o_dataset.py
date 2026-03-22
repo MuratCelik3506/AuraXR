@@ -167,11 +167,13 @@ def load_sequence(seq_dir: str, camera: str = CAMERA_RIG) -> dict:
         if os.path.exists(al_path):
             action_labels[i] = _parse_action_label(al_path)
 
+    raw_hand_poses = hand_poses.copy()
     # Apply wrist-relative normalization (Section 2 of instruction.md)
     hand_poses = wrist_relative_normalize(hand_poses)
 
     return {
         "hand_poses":    hand_poses,
+        "raw_hand_poses": raw_hand_poses,
         "obj_poses_rt":  obj_poses_rt,
         "action_labels": action_labels,
         "num_frames":    F,
