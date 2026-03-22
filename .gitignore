@@ -6,6 +6,7 @@ checkpoints_test_concat/
 
 # Python
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *.pyo
 *.egg-info/

@@ -927,15 +927,17 @@ let totalFrames = 0;
 let sceneDataPlayback = null; // { hand_flat, obj_rt }
 
 function parseObjRt(arr, t) {
-  if (!arr || arr.length === 0) return [0,0,0];
-  // 16 flat floats per frame. T is frame index. translation is M.41, M.42, M.43.
+  if (!arr || arr.length === 0) return null;
   const offset = t * 16;
-  if (offset + 14 >= arr.length) return [0,0,0];
-  // in 4x4 matrix, trans is typically indices 3, 7, 11 OR 12, 13, 14. 
-  // Wait, H2O obj_pose is column major or row major? Usually tx,ty,tz is 3,7,11 (row major) or 12,13,14 (col major).
-  // I will just use 3, 7, 11 for tx, ty, tz as a standard 4x4 flattened. Or we can just put it at 0,0,0 if unknown. 
-  // Actually, we'll try indices 3, 7, 11.
-  return [arr[offset+3], arr[offset+7], arr[offset+11]];
+  if (offset + 15 >= arr.length) return null;
+  // H2O usually stores RT as flattened 4x4.
+  // We'll treat it as row-major based on H2O dataset specs.
+  return [
+    [arr[offset+0], arr[offset+1], arr[offset+2], arr[offset+3]],
+    [arr[offset+4], arr[offset+5], arr[offset+6], arr[offset+7]],
+    [arr[offset+8], arr[offset+9], arr[offset+10], arr[offset+11]],
+    [arr[offset+12], arr[offset+13], arr[offset+14], arr[offset+15]]
+  ];
 }
 
 function render3DFrame() {
@@ -1017,15 +1019,46 @@ function render3DFrame() {
         }
     }
 
-    // 3. Object
-    const [ox, oy, oz] = parseObjRt(objArr, t);
-    traces.push({
-        x: [ox], y: [oy], z: [oz],
-        mode: 'markers',
-        marker: { color: '#f59e0b', size: 10, symbol: 'square' },
-        type: 'scatter3d',
-        showlegend: false
-    });
+    // 3. Object (3D Box Wireframe)
+    const mat = parseObjRt(objArr, t);
+    if (mat) {
+        // Simple bounding box corners (approx 5cm size unless we have better info)
+        const s = 0.04; 
+        const corners = [
+            [-s,-s,-s],[s,-s,-s],[s,s,-s],[-s,s,-s],
+            [-s,-s,s],[s,-s,s],[s,s,s],[-s,s,s]
+        ];
+        // Transform corners by matrix
+        const pts = corners.map(c => {
+            const x = c[0]*mat[0][0] + c[1]*mat[0][1] + c[2]*mat[0][2] + mat[0][3];
+            const y = c[0]*mat[1][0] + c[1]*mat[1][1] + c[2]*mat[1][2] + mat[1][3];
+            const z = c[0]*mat[2][0] + c[1]*mat[2][1] + c[2]*mat[2][2] + mat[2][3];
+            return [x, y, z];
+        });
+        // Box edges (indices)
+        const edges = [
+            [0,1],[1,2],[2,3],[3,0], // bottom
+            [4,5],[5,6],[6,7],[7,4], // top
+            [0,4],[1,5],[2,6],[3,7]  // pillars
+        ];
+        
+        // Single trace for the whole box using null separators to break lines
+        let bx=[], by=[], bz=[];
+        edges.forEach(e => {
+            bx.push(pts[e[0]][0], pts[e[1]][0], null);
+            by.push(pts[e[0]][1], pts[e[1]][1], null);
+            bz.push(pts[e[0]][2], pts[e[1]][2], null);
+        });
+        
+        traces.push({
+            x: bx, y: by, z: bz,
+            mode: 'lines',
+            line: { color: '#f59e0b', width: 4 },
+            type: 'scatter3d',
+            name: 'Object',
+            showlegend: false
+        });
+    }
 
     const layout = {
       margin: { l: 0, r: 0, b: 0, t: 0 },
