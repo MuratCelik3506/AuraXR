@@ -194,6 +194,15 @@ class IntentFormer(nn.Module):
             nn.Linear(d_model // 2, num_classes),
         )
 
+        # ── 6. Pose Regression head (Next Frame) ──────────────
+        # Predicts 126 coordinates (21 joints * 2 hands * 3) or as per input
+        self.pose_head = nn.Sequential(
+            nn.LayerNorm(d_model),
+            nn.Linear(d_model, d_model),
+            nn.GELU(),
+            nn.Linear(d_model, input_dim - 16), # 126 features (hand only)
+        )
+
         self._init_weights()
 
     def _init_weights(self):
@@ -208,8 +217,11 @@ class IntentFormer(nn.Module):
         hand_flat:  torch.Tensor,   # (B, T, 126)
         obj_rt:     torch.Tensor,   # (B, T, 16)
         obs_ratio:  torch.Tensor,   # (B,)
-    ) -> torch.Tensor:
-        """Returns logits of shape (B, num_classes)."""
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Returns (logits, pred_pose).
+           logits: (B, num_classes)
+           pred_pose: (B, 126) - predicted joints for the NEXT frame
+        """
         B, T, _ = hand_flat.shape
 
         # ── Fuse inputs ──────────────────────────────────────
@@ -226,9 +238,13 @@ class IntentFormer(nn.Module):
         # ── Transformer Encoder ───────────────────────────────
         x = self.encoder(x)                            # (B, T+1, d_model)
 
-        # ── Classification from CLS token ────────────────────
+        # ── Heads from CLS token ────────────────────────────
         cls_out = x[:, 0, :]                           # (B, d_model)
-        return self.head(cls_out)                      # (B, num_classes)
+        
+        logits    = self.head(cls_out)                 # (B, num_classes)
+        pred_pose = self.pose_head(cls_out)            # (B, 126)
+        
+        return logits, pred_pose
 
     # ── Convenience method for inference confidence ───────────
     @torch.no_grad()
@@ -239,7 +255,8 @@ class IntentFormer(nn.Module):
         obs_ratio:  torch.Tensor,
     ) -> torch.Tensor:
         """Returns softmax probabilities (B, num_classes)."""
-        return F.softmax(self(hand_flat, obj_rt, obs_ratio), dim=-1)
+        logits, _ = self(hand_flat, obj_rt, obs_ratio)
+        return F.softmax(logits, dim=-1)
 
     # ── Number of parameters ──────────────────────────────────
     def num_parameters(self) -> int:
@@ -253,9 +270,10 @@ if __name__ == "__main__":
     model = IntentFormer()
     print(f"IntentFormer — parameters: {model.num_parameters():,}")
     B, T = 4, 30
-    out = model(
+    logits, pred_pose = model(
         torch.randn(B, T, 126),
         torch.randn(B, T, 16),
         torch.rand(B),
     )
-    print(f"Output shape: {out.shape}")  # (4, 36)
+    print(f"Output logits: {logits.shape}")  # (4, 36)
+    print(f"Output pose  : {pred_pose.shape}")  # (4, 126)

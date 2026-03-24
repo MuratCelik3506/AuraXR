@@ -32,6 +32,7 @@ sys.path.insert(0, str(ROOT))
 from src.models.intent_former import IntentFormer
 from src.data.h2o_dataset import NUM_CLASSES, H2ODataset
 from src.evaluate import compute_ttc
+from src.sliding_window_eval import run_sliding_window
 
 # ── H2O action-class names (36 verb-object combinations) ────────────────────
 ACTION_NAMES = [
@@ -49,97 +50,9 @@ ACTION_NAMES = [
     "drink milk alt",     "grab milk alt",      "use plate",
 ]
 
-# ── presets: (description, obs_ratio, gesture_hint) ────────────────────────
-PRESETS = {
-    "random":   {"label": "🎲 Random Noise",         "obs_ratio": 0.25},
-    "grasp":    {"label": "✋ Grasping Motion",       "obs_ratio": 0.20},
-    "pour":     {"label": "🫗 Pouring Motion",        "obs_ratio": 0.30},
-    "rest":     {"label": "🖐 Hand at Rest",          "obs_ratio": 0.20},
-    "reach":    {"label": "👆 Reaching Motion",       "obs_ratio": 0.25},
-    "pinch":    {"label": "🤌 Pinch Grasp",           "obs_ratio": 0.20},
-}
-
 GHOSTING_THRESHOLD = 0.65   # mirrors instruction.md §5
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Pose generators for each preset
-# ──────────────────────────────────────────────────────────────────────────────
-
-def _make_hand_flat(preset: str, window_size: int, rng: np.random.Generator) -> np.ndarray:
-    """Return (window_size, 126) float32 hand features for the given preset."""
-    T, D = window_size, 126
-
-    if preset == "random":
-        return rng.standard_normal((T, D)).astype(np.float32) * 0.1
-
-    elif preset == "grasp":
-        # Fingers curl progressively toward the palm
-        flat = np.zeros((T, D), dtype=np.float32)
-        for t in range(T):
-            progress = t / max(T - 1, 1)
-            for hand in range(2):
-                base = hand * 63
-                # Wrist stays at 0 (wrist-relative)
-                for j in range(1, 21):
-                    # Finger tips move toward palm
-                    flat[t, base + j * 3]     =  0.05 * j * (1 - progress)
-                    flat[t, base + j * 3 + 1] = -0.02 * j * progress
-                    flat[t, base + j * 3 + 2] =  0.01 * j
-        return flat + rng.standard_normal((T, D)).astype(np.float32) * 0.005
-
-    elif preset == "pour":
-        flat = np.zeros((T, D), dtype=np.float32)
-        for t in range(T):
-            progress = t / max(T - 1, 1)
-            # Wrist rotates (simulate tilt)
-            tilt = progress * 0.3
-            for j in range(21):
-                flat[t, j * 3 + 1] = tilt * j * 0.01
-                flat[t, j * 3 + 2] = progress * 0.05
-        return flat + rng.standard_normal((T, D)).astype(np.float32) * 0.005
-
-    elif preset == "rest":
-        # Fingers slightly spread, no motion
-        flat = np.zeros((T, D), dtype=np.float32)
-        for j in range(1, 21):
-            spread = (j % 5) * 0.02
-            flat[:, j * 3]     = spread
-            flat[:, j * 3 + 1] = 0.05
-            flat[:, j * 3 + 2] = 0.0
-        return flat + rng.standard_normal((T, D)).astype(np.float32) * 0.002
-
-    elif preset == "reach":
-        flat = np.zeros((T, D), dtype=np.float32)
-        for t in range(T):
-            progress = t / max(T - 1, 1)
-            # Hand extends forward
-            flat[t, 2] = progress * 0.3         # z-axis extension
-            for j in range(1, 21):
-                flat[t, j * 3 + 2] = progress * 0.02 * j
-        return flat + rng.standard_normal((T, D)).astype(np.float32) * 0.005
-
-    elif preset == "pinch":
-        flat = np.zeros((T, D), dtype=np.float32)
-        for t in range(T):
-            progress = t / max(T - 1, 1)
-            # Thumb (joints 1-4) and index (joints 5-8) converge
-            for j in range(1, 5):    # thumb
-                flat[t, j * 3]     = 0.05 * (1 - progress)
-                flat[t, j * 3 + 1] = -0.02 * progress
-            for j in range(5, 9):   # index
-                flat[t, j * 3]     = -0.05 * (1 - progress)
-                flat[t, j * 3 + 1] = -0.02 * progress
-        return flat + rng.standard_normal((T, D)).astype(np.float32) * 0.003
-
-    return rng.standard_normal((T, D)).astype(np.float32) * 0.1
-
-
-def _make_obj_rt(window_size: int, rng: np.random.Generator) -> np.ndarray:
-    """Return (window_size, 16) float32 object RT matrix."""
-    base = np.eye(4, dtype=np.float32).flatten()
-    obj  = np.tile(base, (window_size, 1))
-    obj += rng.standard_normal((window_size, 16)).astype(np.float32) * 0.01
-    return obj
+# (Removed synthetic generators: _make_hand_flat, _make_obj_rt)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -180,14 +93,53 @@ def index():
     return send_from_directory(app.static_folder, "index.html")
 
 
-@app.route("/api/presets", methods=["GET"])
-def api_presets():
-    return jsonify(PRESETS)
-
-
 @app.route("/api/action_names", methods=["GET"])
 def api_action_names():
     return jsonify(ACTION_NAMES)
+
+def discover_extra_samples(root_dir):
+    """
+    Scans the annotations directory to find all available clips that have hand_pose data.
+    Ensures we aren't limited by small placeholder split files.
+    """
+    extra = []
+    root = Path(root_dir)
+    anno_root = root / "annotations"
+    if not anno_root.exists():
+        return []
+
+    # subjectN / RIG / TAKE / cam4
+    for cam4_path in anno_root.glob("subject*/h*/[0-9]*/cam4"):
+        rel_path = str(cam4_path.parent.relative_to(anno_root))
+        
+        # Check if hand_pose exists
+        hp_dir = cam4_path / "hand_pose"
+        if not hp_dir.exists():
+            continue
+            
+        # Try to infer label from action_label
+        label = 0
+        al_dir = cam4_path / "action_label"
+        if al_dir.exists():
+            al_files = sorted(list(al_dir.glob("[0-9][0-9][0-9][0-9].txt")))
+            if not al_files:
+                al_files = sorted(list(al_dir.glob("[0-9][0-9][0-9][0-9][0-9][0-9].txt")))
+            
+            if al_files:
+                try:
+                    label = int(open(al_files[0]).read().strip()) - 1
+                    label = max(0, min(label, NUM_CLASSES - 1))
+                except:
+                    label = 0
+        
+        extra.append({
+            "rel_path":     rel_path,
+            "start_act":    10,  # Default range for discovery
+            "end_act":      100, # Will be clipped by loader if too long
+            "label":        label,
+            "obs_ratio":    0.25,
+        })
+    return extra
 
 
 _h2o_ds = None
@@ -196,10 +148,51 @@ def get_h2o_dataset():
     global _h2o_ds
     if _h2o_ds is None:
         try:
-            _h2o_ds = H2ODataset("data/h2o", split="val", window_size=30)
-            if len(_h2o_ds.samples) == 0:
-                _h2o_ds = H2ODataset("data/h2o", split="train", window_size=30)
-        except Exception:
+            # Combine all samples from train, val, and test splits for the UI
+            all_samples = []
+            base_ds = None
+            for split in ["train", "val", "test"]:
+                try:
+                    ds = H2ODataset("data/h2o", split=split, window_size=30)
+                    if ds and len(ds.samples) > 0:
+                        all_samples.extend(ds.samples)
+                        if base_ds is None:
+                            base_ds = ds
+                except Exception:
+                    continue
+            
+            # Fallback: discover everything in annotations if split files are small
+            if len(all_samples) < 50:
+                print(f"[server] Split files limited ({len(all_samples)}). Discovering all clips...")
+                extra = discover_extra_samples("data/h2o")
+                # Merge and avoid exact duplicates
+                seen = set((s["rel_path"], s["start_act"], s["end_act"]) for s in all_samples)
+                for s in extra:
+                    key = (s["rel_path"], s["start_act"], s["end_act"])
+                    if key not in seen:
+                        all_samples.append(s)
+                        seen.add(key)
+            
+            if base_ds and all_samples:
+                _h2o_ds = base_ds
+                _h2o_ds.samples = all_samples
+                print(f"[server] Dataset loaded: {len(all_samples)} total samples.")
+            elif not base_ds:
+                # Absolute fallback if no split file exists at all
+                print("[server] Critical: No split files found. Using discovery only.")
+                # We need a dummy H2ODataset instance to use its methods
+                # Creating one with split='train' just to get the instance, it might fail __init__ if split_file missing
+                # So we manually create a minimal ds-like object if needed, but H2ODataset is robust enough if split_file exists.
+                # Try creating a dummy one
+                try:
+                    _h2o_ds = H2ODataset("data/h2o", split="train", window_size=30)
+                    _h2o_ds.samples = discover_extra_samples("data/h2o")
+                except:
+                    pass
+            else:
+                print("[server] Warning: No dataset samples found in split files.")
+        except Exception as e:
+            print(f"[server] Dataset aggregate error: {e}")
             _h2o_ds = None
     return _h2o_ds
 
@@ -241,11 +234,16 @@ def api_get_real_data(idx):
     s = meta["start_act"]
     e = meta["end_act"]
     num_frames = seq_data["num_frames"]
-    s = max(0, min(s, num_frames - 1))
-    e = max(0, min(e, num_frames - 1))
+    # Optional: return full sequence instead of just the action segment
+    is_full = request.args.get("full", "0") == "1"
     
-    if e < s:
-        e = s
+    if is_full:
+        s = 0
+        e = num_frames - 1
+    else:
+        s = max(0, min(s, num_frames - 1))
+        e = max(0, min(e, num_frames - 1))
+        if e < s: e = s
     
     hand_poses = seq_data["hand_poses"][s:e+1]
     raw_hand_poses = seq_data.get("raw_hand_poses", hand_poses)[s:e+1]
@@ -267,84 +265,50 @@ def api_get_real_data(idx):
         "end_act": e
     })
 
-@app.route("/api/infer", methods=["POST"])
-def api_infer():
-    """
-    Body (JSON):
-      preset      : str            one of 'random'|'grasp'|'pour'|'rest'|'reach'|'pinch'
-      obs_ratio   : float          0.10 – 0.50
-      window_size : int            10 – 60
-      seed        : int            random seed (reproducibility)
-      start_act   : int            action start frame (for TTC)
-      end_act     : int            action end frame   (for TTC)
-      hand_flat   : list[float]    optional: flatten(window_size×126) custom values
-      obj_rt      : list[float]    optional: flatten(window_size×16)  custom values
-    """
-    body = request.get_json(force=True)
-
-    preset      = body.get("preset", "random")
-    obs_ratio   = float(body.get("obs_ratio", 0.25))
-    window_size = int(body.get("window_size", 30))
-    seed        = int(body.get("seed", 42))
-    start_act   = int(body.get("start_act", 20))
-    end_act     = int(body.get("end_act", 80))
-
-    rng = np.random.default_rng(seed)
-
-    # ── Build tensors ────────────────────────────────────────────────────────
-    if "hand_flat" in body and body["hand_flat"]:
-        hf = np.array(body["hand_flat"], dtype=np.float32)
-        hf = hf.reshape(window_size, 126)
-    else:
-        hf = _make_hand_flat(preset, window_size, rng)
-
-    if "obj_rt" in body and body["obj_rt"]:
-        obj = np.array(body["obj_rt"], dtype=np.float32)
-        obj = obj.reshape(window_size, 16)
-    else:
-        obj = _make_obj_rt(window_size, rng)
+@app.route("/api/sliding_window/<int:idx>", methods=["GET"])
+def api_sliding_window(idx):
+    ds = get_h2o_dataset()
+    if ds is None or idx < 0 or idx >= len(ds.samples):
+        return jsonify({"error": "Invalid index"}), 404
+        
+    meta = ds.samples[idx]
+    seq_data = ds._get_sequence(meta["rel_path"])
+    if seq_data is None:
+         return jsonify({"error": "Failed to load sequence"}), 404
 
     model = get_model()
-
-    hand_t = torch.from_numpy(hf).unsqueeze(0).to(_device)     # (1, T, 126)
-    obj_t  = torch.from_numpy(obj).unsqueeze(0).to(_device)    # (1, T,  16)
-    obs_t  = torch.tensor([obs_ratio], dtype=torch.float32).to(_device)
-
-    with torch.no_grad():
-        logits = model(hand_t, obj_t, obs_t)           # (1, 36)
-        proba  = F.softmax(logits, dim=-1)[0]          # (36,)
-
-    proba_np        = proba.cpu().numpy().tolist()
-    pred_class      = int(np.argmax(proba_np))
-    max_conf        = float(proba_np[pred_class])
-    ghost_triggered = max_conf >= GHOSTING_THRESHOLD
-
-    # Top-5
-    top5_idx = np.argsort(proba_np)[::-1][:5].tolist()
-    top5 = [
-        {
-            "rank":       i + 1,
-            "class_idx":  idx,
-            "class_name": ACTION_NAMES[idx],
-            "prob":       round(proba_np[idx], 4),
-        }
-        for i, idx in enumerate(top5_idx)
-    ]
-
-    # TTC
-    ttc_seconds = compute_ttc(start_act, end_act, obs_ratio, fps=30)
-
+    
+    # Read parameters from UI if provided, otherwise default to full sequence from start
+    buffer_frames = int(request.args.get("buffer", 0))
+    sim_frames    = int(request.args.get("sim", 9999))
+    obs_limit     = float(request.args.get("obs_limit", 1.0))
+    
+    res = run_sliding_window(
+        model, 
+        seq_data, 
+        _device, 
+        window_size=30,
+        buffer_frames=buffer_frames,
+        sim_frames=sim_frames,
+        obs_limit=obs_limit
+    )
+    
     return jsonify({
-        "pred_class":      pred_class,
-        "pred_name":       ACTION_NAMES[pred_class],
-        "confidence":      round(max_conf, 4),
-        "ghost_triggered": ghost_triggered,
-        "top5":            top5,
-        "ttc_seconds":     round(ttc_seconds, 3),
-        "obs_ratio":       obs_ratio,
-        "window_size":     window_size,
-        "all_probs":       [round(p, 4) for p in proba_np],
+        "frame_wise_accuracy": round(res["frame_wise_accuracy"], 4),
+        "stability":           round(res["stability"], 4),
+        "convergence_point":   round(res["convergence_point"], 2),
+        "predictions":         res["predictions"],
+        "ground_truth":        res["ground_truth"],
+        "max_probs":           res["max_probs"],
+        "pose_errors":         [round(float(e), 5) for e in res["pose_errors"]],
+        "predicted_poses":     res["predicted_poses"],
+        "gt_poses":            res["gt_poses"],
+        "gt_obj_poses":        res["gt_obj_poses"],
+        "mean_pose_error":     round(res["mean_pose_error"], 5),
+        "path":                meta["rel_path"]
     })
+
+# /api/infer has been removed (was used by manual/synthetic input tabs)
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -378,20 +342,22 @@ def main():
         ckpt = torch.load(args.checkpoint, map_location=_device)
         state = ckpt.get("model", ckpt)
         
-        # Determine model params from checkpoint or CLI-style overrides
-        # For our specific combined_best run: d_model=256, nhead=8, num_layers=6, dim_ff=1024
-        # We try to infer or at least allow larger models to load.
+        # Determine model params from checkpoint
+        # Ultimate run: d_model=512, nhead=16, num_layers=8, dim_ff=2048
+        # Optimized v3: d_model=256, nhead=8, num_layers=6, dim_ff=1024
+        is_ultimate = "v3_ultimate" in args.checkpoint
+        is_v3 = "optimized_v3" in args.checkpoint or "combined_best" in args.checkpoint
+
         ckpt_params = {
             "num_classes": ckpt.get("num_classes", NUM_CLASSES),
-            # Default to the scaled-up params we just used if it's the combined_best path
-            "d_model": 256 if "combined_best" in args.checkpoint else 128,
-            "nhead": 8 if "combined_best" in args.checkpoint else 4,
-            "num_layers": 6 if "combined_best" in args.checkpoint else 4,
-            "dim_ff": 1024 if "combined_best" in args.checkpoint else 512,
+            "d_model":     512 if is_ultimate else (256 if is_v3 else 128),
+            "nhead":       16 if is_ultimate else (8 if is_v3 else 4),
+            "num_layers":  8 if is_ultimate else (6 if is_v3 else 4),
+            "dim_ff":      2048 if is_ultimate else (1024 if is_v3 else 512),
         }
         
         m = get_model(ckpt_params)
-        m.load_state_dict(state)
+        m.load_state_dict(state, strict=False)
         print(f"[server] Loaded checkpoint: {args.checkpoint}")
         print(f"[server] Model Config: d_model={ckpt_params['d_model']} classes={ckpt_params['num_classes']}")
     else:
@@ -399,7 +365,8 @@ def main():
         get_model() # Init default model
         print("[server] Pass --checkpoint checkpoints/best_model.pt for trained predictions.")
 
-    print(f"\n[server] ✓  Open your browser:  http://{args.host}:{args.port}\n")
+# Terminal output simplification
+    print(f"\n[server] ✓ AuraXR Dashboard ready at: http://{args.host}:{args.port}\n")
     app.run(host=args.host, port=args.port, debug=False)
 
 

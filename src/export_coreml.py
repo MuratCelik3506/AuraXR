@@ -169,7 +169,8 @@ class ExportWrapper(nn.Module):
     def forward(self, hand_flat: torch.Tensor,
                 obj_rt: torch.Tensor,
                 obs_ratio: torch.Tensor) -> torch.Tensor:
-        return self.model(hand_flat, obj_rt, obs_ratio)
+        logits, _ = self.model(hand_flat, obj_rt, obs_ratio)
+        return logits
 
 
 # ─────────────────────────────────────────────────────────

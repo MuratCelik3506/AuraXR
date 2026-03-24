@@ -21,6 +21,17 @@ Key Metrics Implemented:
    An estimate (in seconds) of the remaining time before the hand reaches 
    the object, derived from the clip's metadata and observation ratio.
 
+4. Prediction Stability (S):
+   Measures the switching rate of predictions over a sequence. 
+   Stability = 1 - (switches / (total_frames - 1)).
+
+5. Convergence Point (CP):
+   The temporal index (in seconds) from which the model's prediction 
+   remains consistently correct until the end of the window.
+
+6. Frame-wise Accuracy:
+   Percentage of total frames where the prediction matches Ground Truth.
+
 4. Ghosting Trigger Rate:
    The percentage of samples where the model's confidence exceeds the 
    threshold (usually 0.65), indicating how often the "Ghost Hand" 
@@ -147,21 +158,20 @@ def compute_ttc(
     start_act:    int,
     end_act:      int,
     obs_ratio:    float,
-    fps:          int = 30,
-) -> float:
+) -> int:
     """
-    Estimate the TTC (seconds) from the moment a window is sampled
+    Estimate the Frames-to-Contact (FTC) from the moment a window is sampled
     until the expected contact frame.
 
     obs_end  = start_act + int(action_len * obs_ratio)
-    TTC      = (end_act - obs_end) / fps
+    FTC      = (end_act - obs_end)
 
-    Returns TTC in seconds.
+    Returns FTC in frames.
     """
     action_len = end_act - start_act + 1
     obs_end    = start_act + max(1, int(action_len * obs_ratio))
     ttc_frames = max(0, end_act - obs_end)
-    return ttc_frames / fps
+    return int(ttc_frames)
 
 
 def compute_batch_ttc(
@@ -175,6 +185,76 @@ def compute_batch_ttc(
         compute_ttc(s, e, r, fps)
         for s, e, r in zip(start_acts, end_acts, obs_ratios)
     ]
+
+
+# ─────────────────────────────────────────────────────────
+# Advanced Metrics for Sliding Window
+# ─────────────────────────────────────────────────────────
+
+def compute_stability(preds: list[int] | np.ndarray) -> float:
+    """
+    Stability = 1.0 - (number of switches / max possible switches).
+    
+    A 'switch' occurs when preds[t] != preds[t-1].
+    Returns 1.0 if the prediction never changes, 0.0 if it changes every frame.
+    """
+    if len(preds) < 2:
+        return 1.0
+    
+    preds = np.asanyarray(preds)
+    switches = np.sum(preds[1:] != preds[:-1])
+    max_switches = len(preds) - 1
+    return float(1.0 - (switches / max_switches))
+
+
+def find_convergence_point(
+    preds:  list[int] | np.ndarray,
+    labels: list[int] | np.ndarray,
+) -> int:
+    """
+    Find the first frame index 't' such that for all i >= t, preds[i] == labels[i].
+    Returns the frame index relative to the start of the simulation window.
+    If it never converges to 100% correctness, returns the total number of frames.
+    """
+    preds  = np.asanyarray(preds)
+    labels = np.asanyarray(labels)
+    N      = len(preds)
+    
+    if N == 0:
+        return 0
+
+    # Check from the end backwards
+    convergence_frame = N
+    for i in range(N - 1, -1, -1):
+        if preds[i] == labels[i]:
+            convergence_frame = i
+        else:
+            # Broken the chain of correctness
+            break
+            
+    return int(convergence_frame)
+
+
+def compute_frame_wise_accuracy(
+    preds:  list[int] | np.ndarray,
+    labels: list[int] | np.ndarray,
+) -> float:
+    """Simple percentage of matching frames."""
+    preds  = np.asanyarray(preds)
+    labels = np.asanyarray(labels)
+    if len(preds) == 0:
+        return 0.0
+    return float(np.mean(preds == labels))
+
+
+def compute_mpjpe(pose_a: np.ndarray, pose_b: np.ndarray) -> float:
+    """
+    Mean Per-Joint Position Error (MPJPE).
+    pose_a, pose_b: (21, 3) or (N, 21, 3)
+    Returns the average Euclidean distance between joints.
+    """
+    dist = np.linalg.norm(pose_a - pose_b, axis=-1) # (21,) or (N, 21)
+    return float(np.mean(dist))
 
 
 # ─────────────────────────────────────────────────────────
@@ -210,7 +290,7 @@ def evaluate_model(
         obs    = batch["obs_ratio"].to(device)
         labels = batch["label"].to(device)
 
-        logits = model(hand, obj, obs)
+        logits, _ = model(hand, obj, obs)
         probs  = logits.softmax(dim=-1)
         preds  = logits.argmax(dim=-1)
 

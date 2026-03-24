@@ -147,8 +147,18 @@ def load_sequence(seq_dir: str, camera: str = CAMERA_RIG) -> dict:
     op_dir   = os.path.join(cam_dir, "obj_pose_rt")
     al_dir   = os.path.join(cam_dir, "action_label")
 
-    hp_files = sorted(glob.glob(os.path.join(hp_dir, "*.txt")))
-    F        = len(hp_files)
+    # Improved Adaptive Loader (Phase 1 fix): 
+    # Try 4-digit (0000) and 6-digit (000000) patterns separately
+    hp_files_4 = sorted(glob.glob(os.path.join(hp_dir, "[0-9][0-9][0-9][0-9].txt")))
+    hp_files_6 = sorted(glob.glob(os.path.join(hp_dir, "[0-9][0-9][0-9][0-9][0-9][0-9].txt")))
+    
+    # Decide which set to use based on which one has more files (avoids pollution)
+    if len(hp_files_6) >= len(hp_files_4):
+        hp_files = hp_files_6
+    else:
+        hp_files = hp_files_4
+
+    F = len(hp_files)
     if F == 0:
         return None
 
@@ -222,10 +232,18 @@ def extract_window(
     T_out = hand_snippet.shape[0]
     hand_flat = hand_snippet.reshape(T_out, -1)           # (T, 126)
 
+    # Next pose for auxiliary task (regression)
+    # Target frame is obs_end (one frame after the window) if it exists
+    if obs_end < seq_data["num_frames"]:
+        target_pose = seq_data["hand_poses"][obs_end].reshape(-1)
+    else:
+        target_pose = seq_data["hand_poses"][obs_end-1].reshape(-1)
+
     return {
-        "hand_flat":  hand_flat.astype(np.float32),       # (T, 126)
-        "obj_rt":     obj_snippet.astype(np.float32),     # (T, 16)
-        "obs_ratio":  np.float32(obs_ratio),
+        "hand_flat":   hand_flat.astype(np.float32),       # (T, 126)
+        "obj_rt":      obj_snippet.astype(np.float32),     # (T, 16)
+        "target_pose": target_pose.astype(np.float32),     # (126,)
+        "obs_ratio":   np.float32(obs_ratio),
     }
 
 
@@ -263,6 +281,8 @@ class H2ODataset(Dataset):
         window_size: int = 30,
         obs_ratios:  list[float] | None = None,
         camera:      str = CAMERA_RIG,
+        dense:       bool = False,  # If True, sample every N frames of action
+        stride:      int = 5,       # Stride for dense sampling
     ):
         super().__init__()
         self.root_dir    = Path(root_dir)
@@ -270,6 +290,8 @@ class H2ODataset(Dataset):
         self.window_size = window_size
         self.obs_ratios  = obs_ratios if obs_ratios is not None else [0.2, 0.25, 0.3]
         self.camera      = camera
+        self.dense       = dense
+        self.stride      = stride
 
         self._seq_cache: dict[str, dict] = {}
         self.samples: list[dict]         = []
@@ -314,16 +336,31 @@ class H2ODataset(Dataset):
             end_act      = int(end_act)
             action_label = int(action_label) - 1   # → 0-indexed
 
-            for obs_ratio in self.obs_ratios:
-                self.samples.append({
-                    "rel_path":     path,
-                    "start_act":    start_act,
-                    "end_act":      end_act,
-                    "label":        action_label,
-                    "obs_ratio":    obs_ratio,
-                })
+            # Standard Split: specific ratios
+            if not self.dense:
+                for obs_ratio in self.obs_ratios:
+                    self.samples.append({
+                        "rel_path":     path,
+                        "start_act":    start_act,
+                        "end_act":      end_act,
+                        "label":        action_label,
+                        "obs_ratio":    obs_ratio,
+                    })
+            else:
+                # Dense Sampling: sample windows throughout the action starting from 20%
+                action_len = end_act - start_act + 1
+                start_frame = start_act + int(action_len * 0.2)
+                for f in range(start_frame, end_act + 1, self.stride):
+                    ratio = (f - start_act + 1) / action_len
+                    self.samples.append({
+                        "rel_path":     path,
+                        "start_act":    start_act,
+                        "end_act":      end_act,
+                        "label":        action_label,
+                        "obs_ratio":    ratio,
+                    })
 
-        print(f"[H2ODataset] split={self.split}  segments={len(self.samples)}")
+        print(f"[H2ODataset] split={self.split}  segments={len(self.samples)} (dense={self.dense})")
 
     # ------------------------------------------------------------------
     # Dataset interface
@@ -340,10 +377,11 @@ class H2ODataset(Dataset):
             # Return a zeroed fallback rather than crashing
             T  = self.window_size
             return {
-                "hand_flat": torch.zeros(T, NUM_HANDS * NUM_JOINTS * JOINT_DIM),
-                "obj_rt":    torch.zeros(T, 16),
-                "obs_ratio": torch.tensor(meta["obs_ratio"]),
-                "label":     torch.tensor(meta["label"], dtype=torch.long),
+                "hand_flat":   torch.zeros(T, NUM_HANDS * NUM_JOINTS * JOINT_DIM),
+                "obj_rt":      torch.zeros(T, 16),
+                "target_pose": torch.zeros(NUM_HANDS * NUM_JOINTS * JOINT_DIM),
+                "obs_ratio":   torch.tensor(meta["obs_ratio"]),
+                "label":       torch.tensor(meta["label"], dtype=torch.long),
             }
 
         window = extract_window(
@@ -357,17 +395,19 @@ class H2ODataset(Dataset):
         if window is None:
             T = self.window_size
             return {
-                "hand_flat": torch.zeros(T, NUM_HANDS * NUM_JOINTS * JOINT_DIM),
-                "obj_rt":    torch.zeros(T, 16),
-                "obs_ratio": torch.tensor(meta["obs_ratio"]),
-                "label":     torch.tensor(meta["label"], dtype=torch.long),
+                "hand_flat":   torch.zeros(T, NUM_HANDS * NUM_JOINTS * JOINT_DIM),
+                "obj_rt":      torch.zeros(T, 16),
+                "target_pose": torch.zeros(NUM_HANDS * NUM_JOINTS * JOINT_DIM),
+                "obs_ratio":   torch.tensor(meta["obs_ratio"]),
+                "label":       torch.tensor(meta["label"], dtype=torch.long),
             }
 
         return {
-            "hand_flat": torch.from_numpy(window["hand_flat"]),
-            "obj_rt":    torch.from_numpy(window["obj_rt"]),
-            "obs_ratio": torch.tensor(window["obs_ratio"]),
-            "label":     torch.tensor(meta["label"], dtype=torch.long),
+            "hand_flat":   torch.from_numpy(window["hand_flat"]),
+            "obj_rt":      torch.from_numpy(window["obj_rt"]),
+            "target_pose": torch.from_numpy(window["target_pose"]),
+            "obs_ratio":   torch.tensor(window["obs_ratio"]),
+            "label":       torch.tensor(meta["label"], dtype=torch.long),
         }
 
 
@@ -381,6 +421,8 @@ def get_dataloaders(
     window_size: int   = 30,
     obs_ratios: list[float] | None = None,
     num_workers: int   = 4,
+    dense:       bool  = False,
+    stride:      int   = 5,
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
     """Return (train_loader, val_loader, test_loader)."""
     if obs_ratios is None:
@@ -388,7 +430,8 @@ def get_dataloaders(
 
     def make_loader(split, shuffle):
         ds = H2ODataset(root_dir, split=split,
-                        window_size=window_size, obs_ratios=obs_ratios)
+                        window_size=window_size, obs_ratios=obs_ratios,
+                        dense=dense, stride=stride)
         return DataLoader(ds, batch_size=batch_size, shuffle=shuffle,
                           num_workers=num_workers, pin_memory=True,
                           persistent_workers=(num_workers > 0))

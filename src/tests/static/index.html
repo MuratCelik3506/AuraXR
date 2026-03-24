@@ -82,7 +82,7 @@
     .field label { font-size:12px; color:var(--muted); font-weight:500; }
     .val-row { display:flex; align-items:center; gap:10px; }
     input[type="range"] {
-      -webkit-appearance:none; flex:1; height:4px; border-radius:2px;
+      -webkit-appearance:none; appearance:none; flex:1; height:4px; border-radius:2px;
       background:var(--border2); outline:none; cursor:pointer;
     }
     input[type="range"]::-webkit-slider-thumb {
@@ -309,12 +309,12 @@
 
 <!-- ══ HEADER ══════════════════════════════════════════════════════ -->
 <header>
-  <div class="logo-ring">🧠</div>
+  <div class="logo-ring">A</div>
   <div class="header-text">
-    <h1>IntentFormer — Interactive Test Environment</h1>
-    <p>Single-sample inference · XR Intent-Aware Framework · Phase 1</p>
+    <h1>AuraXR — Intent-Aware Simulation Dashboard</h1>
+    <p>Predictive Intelligence · Proactive XR Framework · Phase 1</p>
   </div>
-  <span class="badge">Apple MPS</span>
+  <span class="badge">Metal Accelerated</span>
 </header>
 
 <!-- ══ SIDEBAR ═════════════════════════════════════════════════════ -->
@@ -322,251 +322,18 @@
 
   <!-- Tab bar -->
   <div class="tab-bar">
-    <button class="tab-btn active" onclick="switchTab('preset')">🎛 Preset</button>
-    <button class="tab-btn" onclick="switchTab('joints')">✋ Joints</button>
-    <button class="tab-btn" onclick="switchTab('file')">📂 File</button>
-    <button class="tab-btn" onclick="switchTab('raw')">{ } Raw</button>
-    <button class="tab-btn" onclick="switchTab('dataset')">🗄 Dataset</button>
+    <button class="tab-btn active" onclick="switchTab('dataset')">🗄 Sequence Explorer</button>
+    <button class="tab-btn" onclick="switchTab('sliding')">🌊 Real-Time Simulation</button>
   </div>
 
-  <!-- ── Tab 1: Preset ──────────────────────────────────────────── -->
-  <div class="tab-panel active" id="tab-preset">
-
-    <div>
-      <p class="sec-label">Motion Preset</p>
-      <div class="callout" style="margin-bottom:10px;">
-        Choose a <b>motion type</b>. Each preset generates a realistic skeletal trajectory
-        for all 30 frames (21 joints × 2 hands, wrist-relative). The model receives
-        this as <b>hand_flat (30, 126)</b>.
-      </div>
-      <div class="preset-grid" id="presetGrid"></div>
-    </div>
-
-    <div class="sep"></div>
-
-    <div>
-      <p class="sec-label">Observation Parameters</p>
-      <div style="display:flex;flex-direction:column;gap:12px;">
-        <div class="field">
-          <label>Observation Ratio &nbsp;<span style="font-size:10px;color:var(--muted)">fraction of action seen (0.10–0.50)</span></label>
-          <div class="val-row">
-            <input type="range" id="obsRatio" min="0.10" max="0.50" step="0.01" value="0.25" oninput="syncVal(this,'obsRatioVal')"/>
-            <span class="val-tag" id="obsRatioVal">0.25</span>
-          </div>
-        </div>
-        <div class="field">
-          <label>Window Size &nbsp;<span style="font-size:10px;color:var(--muted)">frames fed to model (10–60)</span></label>
-          <div class="val-row">
-            <input type="range" id="windowSize" min="10" max="60" step="1" value="30" oninput="syncVal(this,'windowSizeVal')"/>
-            <span class="val-tag" id="windowSizeVal">30</span>
-          </div>
-        </div>
-        <div class="field">
-          <label>Random Seed &nbsp;<span style="font-size:10px;color:var(--muted)">controls noise added to each preset</span></label>
-          <div class="val-row">
-            <input type="range" id="seed" min="0" max="9999" step="1" value="42" oninput="syncVal(this,'seedVal')"/>
-            <span class="val-tag" id="seedVal">42</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="sep"></div>
-
-    <div>
-      <p class="sec-label">Action Segment &nbsp;<span style="font-size:9px;font-weight:400;color:var(--muted)">(for TTC calculation)</span></p>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div class="field"><label>Start Frame</label><input type="number" id="startAct" value="20" min="0"/></div>
-        <div class="field"><label>End Frame</label><input type="number" id="endAct" value="80" min="1"/></div>
-      </div>
-    </div>
-
-  </div>
-
-  <!-- ── Tab 2: Joint Editor ────────────────────────────────────── -->
-  <div class="tab-panel" id="tab-joints">
-
-    <div class="callout">
-      Type <b>XYZ coordinates</b> for each of the <b>21 joints</b> per hand (wrist-relative, metres).
-      Joint 0 is the wrist — it should stay at <b>0, 0, 0</b>.
-      These values are repeated for all <b><span id="wsLabel">30</span> frames</b>.
-    </div>
-
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
-      <div class="hand-tabs">
-        <button class="hand-tab-btn active" onclick="switchHand(0)">✋ Left Hand</button>
-        <button class="hand-tab-btn" onclick="switchHand(1)">🤚 Right Hand</button>
-      </div>
-      <div style="display:flex;gap:6px;">
-        <button class="small-btn" onclick="randomiseJoints()">🎲 Randomise</button>
-        <button class="small-btn" onclick="resetJoints()">↺ Reset</button>
-      </div>
-    </div>
-
-    <div style="overflow-x:auto;">
-      <table class="joint-table" id="jointTable">
-        <thead>
-          <tr>
-            <th style="text-align:left;padding-left:8px;">Joint</th>
-            <th class="axis-x">X</th>
-            <th class="axis-y">Y</th>
-            <th class="axis-z">Z</th>
-          </tr>
-        </thead>
-        <tbody id="jointBody"></tbody>
-      </table>
-    </div>
-
-    <div class="sep"></div>
-
-    <!-- shared sliders for joint tab -->
-    <div>
-      <p class="sec-label">Observation Parameters</p>
-      <div style="display:flex;flex-direction:column;gap:10px;">
-        <div class="field">
-          <label>Observation Ratio</label>
-          <div class="val-row">
-            <input type="range" id="obsRatio2" min="0.10" max="0.50" step="0.01" value="0.25" oninput="syncRange2('obsRatio','obsRatioVal',this.value)"/>
-            <span class="val-tag" id="obsRatioVal2">0.25</span>
-          </div>
-        </div>
-        <div class="field">
-          <label>Window Size (frames — joints are repeated across all frames)</label>
-          <div class="val-row">
-            <input type="range" id="windowSize2" min="10" max="60" step="1" value="30" oninput="syncRange2('windowSize','windowSizeVal',this.value);document.getElementById('wsLabel').textContent=this.value"/>
-            <span class="val-tag" id="windowSizeVal2">30</span>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-          <div class="field"><label>Start Frame</label><input type="number" id="startAct2" value="20" min="0" oninput="document.getElementById('startAct').value=this.value"/></div>
-          <div class="field"><label>End Frame</label><input type="number" id="endAct2" value="80" min="1" oninput="document.getElementById('endAct').value=this.value"/></div>
-        </div>
-      </div>
-    </div>
-
-  </div>
-
-  <!-- ── Tab 3: File Upload ─────────────────────────────────────── -->
-  <div class="tab-panel" id="tab-file">
-
-    <div class="callout">
-      Upload a <b>CSV or JSON</b> file containing hand joint data. The file should contain
-      <b>T rows × 126 columns</b> (flattened 2-hand, 21-joint, XYZ pose per frame).
-    </div>
-
-    <div>
-      <p class="sec-label">Expected File Formats</p>
-      <div style="display:flex;flex-direction:column;gap:8px;font-size:11px;color:var(--muted);">
-        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r2);padding:10px;">
-          <b style="color:var(--text);">CSV</b> — one row per frame, 126 comma-separated floats:<br/>
-          <code style="color:#a5b4fc;font-size:10px;">0.01,-0.02,0.03,0.01,…  ← frame 1 (126 values)</code><br/>
-          <code style="color:#a5b4fc;font-size:10px;">0.02,-0.01,0.04,0.02,…  ← frame 2</code>
-        </div>
-        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r2);padding:10px;">
-          <b style="color:var(--text);">JSON</b> — 2D array <code style="color:#a5b4fc">[[...], [...], ...]</code> shape (T, 126),
-          or flat 1D array of T×126 floats.
-        </div>
-      </div>
-    </div>
-
-    <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()" ondragover="e=>e.preventDefault()" ondrop="handleDrop(event)">
-      <div class="upload-icon">📂</div>
-      <p><strong>Click to choose</strong> or drag &amp; drop a file here</p>
-      <p style="margin-top:4px;font-size:10px;">Accepts .csv &nbsp;·&nbsp; .json &nbsp;·&nbsp; .txt</p>
-    </div>
-    <input type="file" id="fileInput" accept=".csv,.json,.txt" onchange="handleFile(event)"/>
-
-    <div id="filePreviewBox" style="display:none;">
-      <p class="sec-label">Loaded File</p>
-      <div class="json-preview" id="filePreview"></div>
-      <div style="margin-top:6px;font-size:11px;color:var(--green);" id="fileStats"></div>
-    </div>
-
-    <div class="sep"></div>
-
-    <!-- Optional obj RT -->
-    <div>
-      <p class="sec-label">Object Pose (optional — defaults to identity matrix)</p>
-      <div class="callout" style="margin-bottom:8px;font-size:10px;">
-        Upload or paste a flat array of <b>T × 16</b> floats for the 4×4 RT matrix.
-      </div>
-      <textarea class="json-area" id="fileObjRt" placeholder='Leave empty → identity matrix used automatically'></textarea>
-    </div>
-
-    <div class="sep"></div>
-
-    <div>
-      <p class="sec-label">Observation Parameters</p>
-      <div style="display:flex;flex-direction:column;gap:10px;">
-        <div class="field">
-          <label>Observation Ratio</label>
-          <div class="val-row">
-            <input type="range" id="obsRatio3" min="0.10" max="0.50" step="0.01" value="0.25" oninput="syncRange2('obsRatio','obsRatioVal',this.value)"/>
-            <span class="val-tag" id="obsRatioVal3">0.25</span>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-          <div class="field"><label>Start Frame</label><input type="number" id="startAct3" value="20" min="0" oninput="document.getElementById('startAct').value=this.value"/></div>
-          <div class="field"><label>End Frame</label><input type="number" id="endAct3" value="80" min="1" oninput="document.getElementById('endAct').value=this.value"/></div>
-        </div>
-      </div>
-    </div>
-
-  </div>
-
-  <!-- ── Tab 4: Raw JSON ────────────────────────────────────────── -->
-  <div class="tab-panel" id="tab-raw">
-
-    <div class="callout">
-      Paste raw JSON arrays directly. Both fields are flat 1D arrays.
-      <b>hand_flat</b> must have <code>window_size × 126</code> values.
-      <b>obj_rt</b> must have <code>window_size × 16</code> values (or leave empty for an identity matrix).
-    </div>
-
-    <div class="field">
-      <label>hand_flat &nbsp;<span style="color:var(--muted);font-size:10px;">window_size × 126 floats (wrist-relative)</span></label>
-      <textarea class="json-area" id="rawHandFlat" placeholder='[0.01, -0.02, 0.03, …]  — paste your flat array here' style="height:110px;"></textarea>
-    </div>
-
-    <div class="field">
-      <label>obj_rt &nbsp;<span style="color:var(--muted);font-size:10px;">window_size × 16 floats (4×4 RT matrix)</span></label>
-      <textarea class="json-area" id="rawObjRt" placeholder='[1, 0, 0, 0, 0, 1, 0, …]  — identity matrix by default'></textarea>
-    </div>
-
-    <div class="sep"></div>
-
-    <div>
-      <p class="sec-label">Observation Parameters</p>
-      <div style="display:flex;flex-direction:column;gap:10px;">
-        <div class="field">
-          <label>Observation Ratio</label>
-          <div class="val-row">
-            <input type="range" id="obsRatio4" min="0.10" max="0.50" step="0.01" value="0.25" oninput="syncRange2('obsRatio','obsRatioVal',this.value)"/>
-            <span class="val-tag" id="obsRatioVal4">0.25</span>
-          </div>
-        </div>
-        <div class="field">
-          <label>Window Size</label>
-          <div class="val-row">
-            <input type="range" id="windowSize4" min="10" max="60" step="1" value="30" oninput="syncRange2('windowSize','windowSizeVal',this.value)"/>
-            <span class="val-tag" id="windowSizeVal4">30</span>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-          <div class="field"><label>Start Frame</label><input type="number" id="startAct4" value="20" min="0" oninput="document.getElementById('startAct').value=this.value"/></div>
-          <div class="field"><label>End Frame</label><input type="number" id="endAct4" value="80" min="1" oninput="document.getElementById('endAct').value=this.value"/></div>
-        </div>
-      </div>
-    </div>
-
-  </div>
+  <!-- (Removed Interactive Tabs: Preset, Joints, File, Raw) -->
 
   
-  <!-- ── Tab 5: Real Dataset ────────────────────────────────────── -->
-  <div class="tab-panel" id="tab-dataset">
+<!-- ── Tab 1: Sequence Explorer ────────────────────────────────────── -->
+  <div class="tab-panel active" id="tab-dataset">
     <div class="callout">
       Select a real action from the <b>Dataset</b> to playback the true sequence
-      step-by-step and see Ghost Hand visualization.
+      step-by-step and inspect ground-truth poses.
     </div>
     
     <div class="field">
@@ -604,30 +371,79 @@
     </div>
   </div>
 
-  <!-- ── Sticky run bar ───────────────────────────────────────────── -->
-  <div class="run-bar" style="margin-top:auto;">
-    <button id="btnInfer" onclick="runInference()">
-      <div class="spinner" id="spinner"></div>
-      <span id="btnText">▶ Run Inference</span>
+  <!-- ── Tab 2: Real-Time Simulation ──────────────────────── -->
+  <div class="tab-panel" id="tab-sliding">
+    <div class="callout">
+      Run a <b>Sliding Window Simulation</b> (10s buffer + 20s window) 
+      on a full sequence and calculate advanced metrics.
+    </div>
+
+    <div class="field">
+      <label>Choose a Sequence</label>
+      <select id="slidingSelect">
+        <option value="" disabled selected>Select a sequence...</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>Buffer Frames (Start frame)</label>
+      <div class="val-row">
+        <input type="range" id="slidingBuffer" min="0" max="600" step="10" value="0" oninput="syncVal(this,'sbVal')"/>
+        <span class="val-tag" id="sbVal">0</span>
+      </div>
+    </div>
+
+    <div class="field" style="margin-top:10px;">
+      <label>Simulation Duration (Frames after buffer)</label>
+      <div class="val-row">
+        <input type="range" id="slidingSim" min="60" max="5000" step="30" value="5000" oninput="syncVal(this,'ssVal')"/>
+        <span class="val-tag" id="ssVal">5000</span>
+      </div>
+    </div>
+
+    <div class="field" style="margin-top:10px;">
+      <label>Observation Limit (0.1 - 1.0)</label>
+      <div class="val-row">
+        <input type="range" id="slidingLimit" min="0.1" max="1.0" step="0.05" value="1.0" oninput="syncVal(this,'slVal')"/>
+        <span class="val-tag" id="slVal">1.00</span>
+      </div>
+    </div>
+
+    <button id="btnRunSliding" class="small-btn" onclick="runSlidingSimulation()" style="width:100%; height:44px; margin-top:18px; background:rgba(99,102,241,.1); border-color:var(--accent); color:var(--text); font-weight:700;">
+      🌊 Run Simulation
     </button>
-    <p class="kbd">Shortcut: <kbd>⌘ Enter</kbd> &nbsp;·&nbsp; Input from: <b id="activeTabLabel" style="color:var(--accent)">Preset</b></p>
+    
+    <div id="slidingProgress" style="display:none; text-align:center; font-size:12px; color:var(--muted); margin-top:10px;">
+      <div class="spinner" style="display:inline-block; margin-right:8px;"></div>
+      Simulating sequence...
+    </div>
+
+    <div class="sep" style="margin:16px 0;"></div>
+
+    <div id="slidingSummary" style="display:none; flex-direction:column; gap:12px;">
+      <p class="sec-label">Simulation Summary</p>
+      <div class="metric-grid" style="grid-template-columns:1fr 1fr;">
+        <div class="mcard"><div class="mv" id="sAcc">--</div><div class="ml">Accuracy</div></div>
+        <div class="mcard"><div class="mv" id="sStab">--</div><div class="ml">Stability</div></div>
+        <div class="mcard"><div class="mv" id="sConv">--</div><div class="ml">Conv Frame</div></div>
+        <div class="mcard"><div class="mv" id="sPose">--</div><div class="ml">Mean Pose Error</div></div>
+      </div>
+    </div>
   </div>
 
+  <!-- Run bar removed (Simulation has its own triggers) -->
 </aside>
 
 <!-- ══ MAIN RESULTS ════════════════════════════════════════════════ -->
 
 <main id="mainPanel">
   <div class="empty-state" id="emptyState">
-    <div class="empty-icon">🎯</div>
-    <h2>Ready for Inference</h2>
-    <p>Choose one of the <b>5 input methods</b> on the left, configure your parameters, then click <b>Run Inference</b>.</p>
+    <div class="empty-icon">🛰️</div>
+    <h2>AuraXR Simulation Environment</h2>
+    <p>Select a <b>Real Dataset Sequence</b> on the left to begin analysis or run a real-time predictive simulation.</p>
     <div class="method-chips">
-      <div class="method-chip">🎛 Preset Motion</div>
-      <div class="method-chip">✋ Joint Editor</div>
-      <div class="method-chip">📂 File Upload</div>
-      <div class="method-chip">{ } Raw JSON</div>
-      <div class="method-chip">🗄 Real Dataset</div>
+      <div class="method-chip">🗄️ Sequence Explorer</div>
+      <div class="method-chip">🌊 Real-Time Simulation</div>
     </div>
   </div>
 
@@ -643,9 +459,9 @@
         <div style="display:flex; flex-direction:column; flex:1; gap:4px;">
           <input type="range" id="timeSlider" min="0" max="100" value="0" style="height:3px;" oninput="onTimeSliderChange(this.value)" />
           <div style="display:flex; justify-content:space-between; font-size:10px; color:var(--muted); font-family:monospace;">
-            <span id="lblTimeStart">t=0</span>
+            <span id="lblTimeStart">idx=0</span>
             <span id="lblTimeCur">Frame 0</span>
-            <span id="lblTimeEnd">t=30</span>
+            <span id="lblTimeEnd">idx=29</span>
           </div>
         </div>
       </div>
@@ -664,641 +480,484 @@
 
 <script>
 /* ─────────────────────────────────────────
-   Constants
-───────────────────────────────────────── */
-const JOINT_NAMES = [
-  'Wrist','Thumb-1','Thumb-2','Thumb-3','Thumb-tip',
-  'Index-1','Index-2','Index-3','Index-tip',
-  'Middle-1','Middle-2','Middle-3','Middle-tip',
-  'Ring-1','Ring-2','Ring-3','Ring-tip',
-  'Pinky-1','Pinky-2','Pinky-3','Pinky-tip',
-];
+   Constants & State
+   ───────────────────────────────────────── */
+const JOINT_NAMES = ["Wrist", "Thumb_MCP", "Thumb_PIP", "Thumb_DIP", "Thumb_Tip", "Index_MCP", "Index_PIP", "Index_DIP", "Index_Tip", "Middle_MCP", "Middle_PIP", "Middle_DIP", "Middle_Tip", "Ring_MCP", "Ring_PIP", "Ring_DIP", "Ring_Tip", "Pinky_MCP", "Pinky_PIP", "Pinky_DIP", "Pinky_Tip"];
+let ACTION_LABELS = [];
+const TAB_LABELS = {dataset:'Real Dataset', sliding:'Sliding Window'};
 
-/* ─────────────────────────────────────────
-   State
-───────────────────────────────────────── */
-let activePreset  = 'random';
-let activeTab     = 'preset';
-let activeHand    = 0;
-let actionNames   = [];
-let fileHandFlat  = null;   // loaded from file upload (flat array)
-// joint editor state: [hand][joint][axis] = float
-let jointState = [
-  Array.from({length:21}, () => [0,0,0]),
-  Array.from({length:21}, () => [0,0,0]),
-];
-
-/* ─────────────────────────────────────────
-   Boot
-───────────────────────────────────────── */
-async function boot() {
-  const presets = await fetch('/api/presets').then(r=>r.json());
-  const grid    = document.getElementById('presetGrid');
-  for (const [key, p] of Object.entries(presets)) {
-    const btn = document.createElement('button');
-    btn.className = 'preset-btn' + (key==='random'?' active':'');
-    btn.id = 'preset_'+key;
-    const [emoji, ...words] = p.label.split(' ');
-    btn.innerHTML = `<span class="emoji">${emoji}</span><span>${words.join(' ')}</span>`;
-    btn.onclick = () => selectPreset(key, p.obs_ratio);
-    grid.appendChild(btn);
-  }
-
-  
-  actionNames = await fetch('/api/action_names').then(r=>r.json());
-  fetchDatasetList(); // NEW! Load real dataset samples
-
-  buildJointTable();
-
-  document.addEventListener('keydown', e => {
-    if ((e.metaKey||e.ctrlKey) && e.key==='Enter') runInference();
-  });
-
-  // drag-drop for upload zone
-  const zone = document.getElementById('uploadZone');
-  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
-  zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
-  zone.addEventListener('drop', handleDrop);
-}
-
-/* ─────────────────────────────────────────
-   Tabs
-───────────────────────────────────────── */
-const TAB_LABELS = {preset:'Preset', joints:'Joint Editor', file:'File Upload', raw:'Raw JSON', dataset:'Real Dataset'};
-function switchTab(name) {
-  activeTab = name;
-  document.querySelectorAll('.tab-btn').forEach((b,i) => {
-    b.classList.toggle('active', ['preset','joints','file','raw','dataset'][i]===name);
-  });
-  document.querySelectorAll('.tab-panel').forEach(p => {
-    p.classList.toggle('active', p.id==='tab-'+name);
-  });
-  document.getElementById('activeTabLabel').textContent = TAB_LABELS[name];
-}
-
-/* ─────────────────────────────────────────
-   Preset selector
-───────────────────────────────────────── */
-function selectPreset(key, obs) {
-  activePreset = key;
-  document.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
-  document.getElementById('preset_'+key).classList.add('active');
-  const sl = document.getElementById('obsRatio');
-  sl.value = obs; syncVal(sl,'obsRatioVal');
-}
-
-/* ─────────────────────────────────────────
-   Slider sync helpers
-───────────────────────────────────────── */
-function syncVal(el, id) {
-  document.getElementById(id).textContent =
-    (el.id==='windowSize'||el.id==='seed') ? el.value : parseFloat(el.value).toFixed(2);
-}
-function syncRange2(masterId, masterValId, val) {
-  // sync all slave sliders back to master
-  const el = document.getElementById(masterId);
-  el.value = val;
-  syncVal(el, masterValId);
-  
-  if (masterId === 'obsRatio') {
-    ['obsRatioVal2','obsRatioVal3','obsRatioVal4','obsRatioVal5'].forEach(id => {
-      const el2 = document.getElementById(id);
-      if (el2) el2.textContent = parseFloat(val).toFixed(2);
-    });
-  } else if (masterId === 'windowSize') {
-    ['windowSizeVal2','windowSizeVal4','windowSizeVal5'].forEach(id => {
-      const el2 = document.getElementById(id);
-      if (el2) el2.textContent = val;
-    });
-    const wsL = document.getElementById('wsLabel');
-    if (wsL) wsL.textContent = val;
-  }
-}
-
-/* ─────────────────────────────────────────
-   Joint Editor
-───────────────────────────────────────── */
-function buildJointTable() {
-  const tbody = document.getElementById('jointBody');
-  tbody.innerHTML = '';
-  JOINT_NAMES.forEach((name, j) => {
-    const tr = document.createElement('tr');
-    const vals = jointState[activeHand][j];
-    const axes = ['x','y','z'];
-    tr.innerHTML = `<td class="joint-name">${j}. ${name}</td>` +
-      axes.map((ax,i) =>
-        `<td><input class="joint-input" type="number" step="0.01"
-           data-hand="${activeHand}" data-j="${j}" data-ax="${i}"
-           value="${vals[i].toFixed(3)}"
-           oninput="updateJoint(${activeHand},${j},${i},this.value)"
-           ${j===0?'disabled title="Wrist is always 0,0,0 (wrist-relative)"':''}
-         /></td>`
-      ).join('');
-    tbody.appendChild(tr);
-  });
-}
-function switchHand(h) {
-  activeHand = h;
-  document.querySelectorAll('.hand-tab-btn').forEach((b,i)=>b.classList.toggle('active',i===h));
-  buildJointTable();
-}
-function updateJoint(h, j, ax, val) {
-  jointState[h][j][ax] = parseFloat(val)||0;
-}
-function resetJoints() {
-  jointState[activeHand] = Array.from({length:21}, ()=>[0,0,0]);
-  buildJointTable();
-}
-function randomiseJoints() {
-  jointState[activeHand] = Array.from({length:21}, (_, j) =>
-    j===0 ? [0,0,0] : [(Math.random()-.5)*.2,(Math.random()-.5)*.2,(Math.random()-.5)*.1]
-  );
-  buildJointTable();
-}
-
-/** Convert joint editor state → hand_flat (T, 126) flat array.
-    We repeat the same pose for every frame (static pose across window). */
-function jointsToHandFlat(windowSize) {
-  const frame = [];
-  for (let h=0; h<2; h++) {
-    for (let j=0; j<21; j++) {
-      frame.push(...jointState[h][j]);
-    }
-  }
-  // repeat across window
-  const out = [];
-  for (let t=0; t<windowSize; t++) out.push(...frame);
-  return out;
-}
-
-/* ─────────────────────────────────────────
-   File Upload
-───────────────────────────────────────── */
-function handleDrop(e) {
-  e.preventDefault();
-  document.getElementById('uploadZone').classList.remove('drag');
-  const file = e.dataTransfer.files[0];
-  if (file) processFile(file);
-}
-function handleFile(e) { processFile(e.target.files[0]); }
-
-function processFile(file) {
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = ev => {
-    const raw = ev.target.result.trim();
-    try {
-      let data;
-      if (file.name.endsWith('.json')) {
-        data = JSON.parse(raw);
-        if (Array.isArray(data[0])) {
-          // 2D array → flatten
-          fileHandFlat = data.flat();
-        } else {
-          fileHandFlat = data;
-        }
-      } else {
-        // CSV or TXT: rows × columns
-        const rows = raw.split('\n').filter(l=>l.trim());
-        fileHandFlat = rows.flatMap(row => row.split(',').map(Number));
-      }
-      const nFrames = Math.floor(fileHandFlat.length / 126);
-      document.getElementById('filePreviewBox').style.display = '';
-      document.getElementById('filePreview').textContent = raw.slice(0,200) + (raw.length>200?'…':'');
-      document.getElementById('fileStats').textContent =
-        `✓ Loaded ${file.name} — ${fileHandFlat.length} values → ${nFrames} frame(s) × 126 features`;
-    } catch(err) {
-      showToast('Failed to parse file: ' + err.message);
-    }
-  };
-  reader.readAsText(file);
-}
-
-/* ─────────────────────────────────────────
-   Build request body
-───────────────────────────────────────── */
-
+// Simulation State
+let activeTab = 'dataset';
 let datasetSamples = [];
-let loadedDatasetData = null; // { hand_flat, obj_rt, T, start_act, end_act, action_name }
+let sceneDataPlayback = null; // { hand_flat, obj_rt }
 
-async function fetchDatasetList() {
-  try {
-    datasetSamples = await fetch('/api/real_data').then(r=>r.json());
-    const sel = document.getElementById('datasetSelect');
-    sel.innerHTML = '<option value="" disabled selected>Select a segment...</option>';
-    datasetSamples.forEach(s => {
-      const opt = document.createElement('option');
-      opt.value = s.idx;
-      opt.textContent = `[Idx ${s.idx}] ${s.action_name} (${s.end_act - s.start_act + 1} frames)`;
-      sel.appendChild(opt);
-    });
-  } catch(e) {
-    document.getElementById('datasetSelect').innerHTML = '<option disabled>Failed to load dataset</option>';
-  }
-}
-
-async function loadDatasetSample(idx) {
-  try {
-    const data = await fetch(`/api/real_data/${idx}`).then(r=>r.json());
-    if (data.error) throw new Error(data.error);
-    loadedDatasetData = data;
-    
-    // Flatten the arrays to 1D since backend returns 2D arrays
-    loadedDatasetData.hand_flat = data.hand_flat.flat();
-    if (data.raw_hand_flat) {
-       loadedDatasetData.raw_hand_flat = data.raw_hand_flat.flat();
-    }
-    loadedDatasetData.obj_rt = data.obj_rt.flat();
-    
-    document.getElementById('datasetDetails').style.display='flex';
-    document.getElementById('dsTrueAction').textContent = data.action_name;
-    document.getElementById('dsLength').textContent = data.T;
-    
-    showToast(`Loaded segment: ${data.action_name} (${data.T} frames)`);
-  } catch(e) {
-    showToast("Error loading sample: " + e.message);
-  }
-}
-
-// Add state for 3D playback
+// 3D Playback State
 let playbackTimer = null;
 let currentFrame = 0;
 let totalFrames = 0;
-let sceneDataPlayback = null; // { hand_flat, obj_rt }
 
-function parseObjRt(arr, t) {
-  if (!arr || arr.length === 0) return null;
-  const offset = t * 16;
-  if (offset + 15 >= arr.length) return null;
-  // H2O usually stores RT as flattened 4x4.
-  // We'll treat it as row-major based on H2O dataset specs.
-  return [
-    [arr[offset+0], arr[offset+1], arr[offset+2], arr[offset+3]],
-    [arr[offset+4], arr[offset+5], arr[offset+6], arr[offset+7]],
-    [arr[offset+8], arr[offset+9], arr[offset+10], arr[offset+11]],
-    [arr[offset+12], arr[offset+13], arr[offset+14], arr[offset+15]]
-  ];
-}
-
-function render3DFrame() {
-  try {
-    if (!sceneDataPlayback) return;
-    const t = currentFrame;
-    const hf = sceneDataPlayback.hand_flat || [];
-    const objArr = sceneDataPlayback.obj_rt || [];
-    
-    if (t * 126 >= hf.length) return; // out of bounds
-    
-    const FINGERS = [
-       [0, 1, 2, 3, 4],
-       [0, 5, 6, 7, 8],
-       [0, 9, 10, 11, 12],
-       [0, 13, 14, 15, 16],
-       [0, 17, 18, 19, 20]
-    ];
-    const traces = [];
-
-    // 1. Current Hands
-    const offset = t * 126;
-    for(let h=0; h<2; h++){
-      const ho = h*63;
-      const hCol = h===0 ? '#8b5cf6' : '#6366f1';
-      for(let f=0; f<FINGERS.length; f++){
-         const finger = FINGERS[f];
-         let tx=[], ty=[], tz=[];
-         for(let i=0; i<finger.length; i++){
-            const j = finger[i];
-            tx.push(hf[offset + ho + j*3]);
-            ty.push(hf[offset + ho + j*3 + 1]);
-            tz.push(hf[offset + ho + j*3 + 2]);
-         }
-         traces.push({
-           x: tx, y: ty, z: tz,
-           mode: 'lines+markers',
-           marker: { color: hCol, size: 4, opacity: 0.9, line:{width:0} },
-           line: { color: hCol, width: 3 },
-           type: 'scatter3d',
-           showlegend: false
-         });
-      }
-    }
-    
-    // 2. Ghost Hands (Leader Ghost concept)
-    if (window.lastInferenceData && window.lastInferenceData.ghost_triggered) {
-        if (loadedDatasetData) {
-           const endT = loadedDatasetData.T - 1;
-           // Ghost is 10 frames (approx 1/3 sec) ahead of current hand to show the future path
-           let ghostT = t + 10; 
-           if (ghostT > endT) ghostT = endT; // stop at contact point
-           
-           const eg = ghostT * 126;
-           const egHf = loadedDatasetData.raw_hand_flat || loadedDatasetData.hand_flat;
-           if (eg < egHf.length) {
-              for(let h=0; h<2; h++){
-                 const ho = h*63;
-                 for(let f=0; f<FINGERS.length; f++){
-                    const finger = FINGERS[f];
-                    let tx=[], ty=[], tz=[];
-                    for(let i=0; i<finger.length; i++){
-                       const j = finger[i];
-                       tx.push(egHf[eg + ho + j*3]);
-                       ty.push(egHf[eg + ho + j*3 + 1]);
-                       tz.push(egHf[eg + ho + j*3 + 2]);
-                    }
-                    traces.push({
-                       x: tx, y: ty, z: tz,
-                       mode: 'lines+markers',
-                       marker: { color: '#22c55e', size: 4, opacity: 0.5, line:{width:0} },
-                       line: { color: '#22c55e', width: 2 },
-                       type: 'scatter3d',
-                       showlegend: false
-                    });
-                 }
-              }
-           }
-        }
-    }
-
-    // 3. Object (3D Box Wireframe)
-    const mat = parseObjRt(objArr, t);
-    if (mat) {
-        // Simple bounding box corners (approx 5cm size unless we have better info)
-        const s = 0.04; 
-        const corners = [
-            [-s,-s,-s],[s,-s,-s],[s,s,-s],[-s,s,-s],
-            [-s,-s,s],[s,-s,s],[s,s,s],[-s,s,s]
-        ];
-        // Transform corners by matrix
-        const pts = corners.map(c => {
-            const x = c[0]*mat[0][0] + c[1]*mat[0][1] + c[2]*mat[0][2] + mat[0][3];
-            const y = c[0]*mat[1][0] + c[1]*mat[1][1] + c[2]*mat[1][2] + mat[1][3];
-            const z = c[0]*mat[2][0] + c[1]*mat[2][1] + c[2]*mat[2][2] + mat[2][3];
-            return [x, y, z];
-        });
-        // Box edges (indices)
-        const edges = [
-            [0,1],[1,2],[2,3],[3,0], // bottom
-            [4,5],[5,6],[6,7],[7,4], // top
-            [0,4],[1,5],[2,6],[3,7]  // pillars
-        ];
-        
-        // Single trace for the whole box using null separators to break lines
-        let bx=[], by=[], bz=[];
-        edges.forEach(e => {
-            bx.push(pts[e[0]][0], pts[e[1]][0], null);
-            by.push(pts[e[0]][1], pts[e[1]][1], null);
-            bz.push(pts[e[0]][2], pts[e[1]][2], null);
-        });
-        
-        traces.push({
-            x: bx, y: by, z: bz,
-            mode: 'lines',
-            line: { color: '#f59e0b', width: 4 },
-            type: 'scatter3d',
-            name: 'Object',
-            showlegend: false
-        });
-    }
-
-    const layout = {
-      margin: { l: 0, r: 0, b: 0, t: 0 },
-      paper_bgcolor: 'rgba(0,0,0,0)',
-      plot_bgcolor: 'rgba(0,0,0,0)',
-      scene: {
-        xaxis: { title:'', showgrid:false, zeroline:false, showticklabels:false },
-        yaxis: { title:'', showgrid:false, zeroline:false, showticklabels:false },
-        zaxis: { title:'', showgrid:false, zeroline:false, showticklabels:false },
-        aspectmode: 'cube'
-      }
-    };
-    
-    Plotly.react('vis3d', traces, layout, {displayModeBar: false});
-    document.getElementById('lblTimeCur').textContent = `Frame ${t}`;
-    document.getElementById('timeSlider').value = t;
-  } catch (err) {
-    console.error(`JS CRASH: ${err.message}`);
-  }
-}
-
-function togglePlayback() {
-  const btn = document.getElementById('btnPlayPause');
-  if (playbackTimer) {
-     clearInterval(playbackTimer);
-     playbackTimer = null;
-     btn.textContent = '▶ Play';
-  } else {
-     if (currentFrame >= totalFrames - 1) currentFrame = 0;
-     btn.textContent = '⏸ Pause';
-     playbackTimer = setInterval(() => {
-        currentFrame++;
-        if (currentFrame >= totalFrames) {
-           currentFrame = totalFrames - 1;
-           togglePlayback();
-           // when reaching the end, if ghost is not shown yet, we could trigger something here
-        }
-        render3DFrame();
-     }, 100); // 10 fps playback for typical 30-frame window
-  }
-}
-
-function onTimeSliderChange(val) {
-   currentFrame = parseInt(val);
-   if (playbackTimer) togglePlayback(); // pause when dragging
-   render3DFrame();
-}
-
-
-function buildBody() {
-  const obsRatio   = parseFloat(document.getElementById('obsRatio').value);
-  const windowSize = parseInt(document.getElementById('windowSize').value);
-  const seed       = parseInt(document.getElementById('seed').value);
-  const startAct   = parseInt(document.getElementById('startAct').value);
-  const endAct     = parseInt(document.getElementById('endAct').value);
-
-  const base = { obs_ratio:obsRatio, window_size:windowSize, seed,
-                 start_act:startAct, end_act:endAct };
-
-  if (activeTab === 'preset') {
-    return { ...base, preset: activePreset, inputSource:'preset:'+activePreset };
-  }
-
-  if (activeTab === 'joints') {
-    const hf = jointsToHandFlat(windowSize);
-    return { ...base, preset:'random', hand_flat: hf, inputSource:'Joint Editor' };
-  }
-
-  if (activeTab === 'file') {
-    if (!fileHandFlat) { showToast('No file loaded yet — upload a CSV or JSON first.'); return null; }
-    const hf = fileHandFlat.slice(0, windowSize*126);
-    // pad if short
-    while (hf.length < windowSize*126) hf.push(0);
-    let obj = null;
-    const orRaw = document.getElementById('fileObjRt').value.trim();
-    if (orRaw) { try{obj=JSON.parse(orRaw);}catch{} }
-    const body = { ...base, preset:'random', hand_flat:hf, inputSource:'File Upload' };
-    if (obj) body.obj_rt = obj;
-    return body;
-  }
-
+/* ─────────────────────────────────────────
+   Core UI Functions
+   ───────────────────────────────────────── */
+function switchTab(tabId) {
+  activeTab = tabId;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.querySelector(`.tab-btn[onclick*="${tabId}"]`);
+  if (btn) btn.classList.add('active');
   
-  if (activeTab === 'dataset') {
-    if (!loadedDatasetData) { showToast('No dataset sample selected'); return null; }
-    // We send window_size frames from 0 to window_size to the model
-    // Wait, the model expects (windowSize, 126). 
-    // We can just extract the first windowSize frames from loadedDatasetData
-    let hf = loadedDatasetData.hand_flat.slice(0, windowSize * 126);
-    let obj = loadedDatasetData.obj_rt.slice(0, windowSize * 16);
-    
-    // pad if short
-    while (hf.length < windowSize*126) hf.push(0);
-    while (obj.length < windowSize*16) obj.push(0);
-
-    return { ...base, preset:'random', hand_flat:hf, obj_rt:obj, inputSource:'Dataset: '+loadedDatasetData.action_name };
-  }
-
-  if (activeTab === 'raw') {
-    const hfRaw = document.getElementById('rawHandFlat').value.trim();
-    const orRaw = document.getElementById('rawObjRt').value.trim();
-    let hf = null, obj = null;
-    try { if(hfRaw) hf  = JSON.parse(hfRaw); } catch(e){ showToast('hand_flat JSON error: '+e.message); return null; }
-    try { if(orRaw) obj = JSON.parse(orRaw);  } catch(e){ showToast('obj_rt JSON error: '+e.message);    return null; }
-    const body = { ...base, preset:'random', inputSource:'Raw JSON' };
-    if (hf)  body.hand_flat = hf;
-    if (obj) body.obj_rt    = obj;
-    return body;
-  }
-
-  return base;
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  const pane = document.getElementById('tab-' + tabId);
+  if (pane) pane.classList.add('active');
+  
+  // Clear previous results/simulation state when switching tabs
+  document.getElementById('emptyState').style.display = 'flex';
+  document.getElementById('resultContent').style.display = 'none';
+  const stats = document.getElementById('inferStatsTarget');
+  if (stats) stats.innerHTML = '';
+  
+  fetchDatasetList();
 }
 
-/* ─────────────────────────────────────────
-   Run Inference
-───────────────────────────────────────── */
-async function runInference() {
-  const body = buildBody();
-  if (!body) return;
-
-  const btn = document.getElementById('btnInfer');
-  btn.classList.add('loading');
-  document.getElementById('spinner').style.display='block';
-  document.getElementById('btnText').textContent='Running…';
-
+async function fetchDatasetList() {
   try {
-    const res = await fetch('/api/infer', {
-      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+    const list = await fetch('/api/real_data').then(r=>r.json());
+    if (list.error) throw new Error(list.error);
+    
+    datasetSamples = list;
+    const dsSel = document.getElementById('datasetSelect');
+    const slSel = document.getElementById('slidingSelect');
+    
+    let html = '<option value="" disabled selected>Select a sequence...</option>';
+    list.forEach((item, i) => {
+       html += `<option value="${item.idx}">[${item.idx}] ${item.action_name} (${item.path})</option>`;
     });
-    if (!res.ok) throw new Error('Server error '+res.status);
-    const data = await res.json();
-    data.inputSource = body.inputSource || 'Unknown';
-    renderResults(data);
-  } catch(e) { showToast('Inference failed: '+e.message); }
-
-  btn.classList.remove('loading');
-  document.getElementById('spinner').style.display='none';
-  document.getElementById('btnText').textContent='▶ Run Inference';
+    
+    if (dsSel) dsSel.innerHTML = html;
+    if (slSel) slSel.innerHTML = html;
+  } catch(e) {
+    console.error("Dataset list error:", e);
+    showToast("Error loading dataset list");
+  }
 }
 
-/* ─────────────────────────────────────────
-   Render Results
-───────────────────────────────────────── */
+async function boot() {
+  console.log("AuraXR Booting...");
+  ACTION_LABELS = await fetch('/api/action_names').then(r=>r.json());
+  fetchDatasetList();
+}
+
+function syncVal(el, id) {
+  const target = document.getElementById(id);
+  if (!target) return;
+  target.textContent = (el.id.includes('windowSize')||el.id.includes('seed')||el.id.includes('sliding')) ? el.value : parseFloat(el.value).toFixed(2);
+}
+
+function syncRange2(masterId, masterValId, val) {
+    // Correct logic: find the specific label by combining masterId and tab-specific suffix if needed,
+    // or just update BOTH the label and the internal state.
+    // In our simplified UI, we only care about Val5 labels.
+    const labelId = (masterValId === 'obsRatioVal') ? 'obsRatioVal5' : 'windowSizeVal5';
+    const target = document.getElementById(labelId);
+    if (target) {
+        target.textContent = (masterId === 'obsRatio') ? parseFloat(val).toFixed(2) : val;
+    }
+}
+
+/* runInference and buildBody removed */
 
 function renderResults(d) {
   window.lastInferenceData = d;
   document.getElementById('emptyState').style.display = 'none';
   document.getElementById('resultContent').style.display = 'flex';
-  
-  const pct  = Math.round(d.confidence*100);
-  const cc   = d.confidence>=.65?'high':d.confidence>=.35?'mid':'low';
+  document.getElementById('card3D').style.display = 'block';
 
-  document.getElementById('resSrcTag').textContent = `📥 Input: ${d.inputSource}  ·  ${d.window_size} frames  ·  obs_ratio ${d.obs_ratio.toFixed(2)}`;
+  const pct = Math.round(d.confidence*100);
+  const cc = d.confidence>=.65?'high':d.confidence>=.35?'mid':'low';
+  document.getElementById('resSrcTag').textContent = `📥 Input: ${d.inputSource} · obs_ratio ${d.obs_ratio.toFixed(2)}`;
 
   // Setup 3D Playback
   currentFrame = 0;
-  // Use loadedDataset if it's the dataset tab to show the full sequence!
-  if (activeTab === 'dataset' && loadedDatasetData) {
-     totalFrames = loadedDatasetData.T;
-     sceneDataPlayback = { 
-        hand_flat: loadedDatasetData.raw_hand_flat || loadedDatasetData.hand_flat, 
-        obj_rt: loadedDatasetData.obj_rt 
-     };
-  } else {
-     totalFrames = d.window_size;
-     // The server actually doesn't return the raw input back to us!
-     // We should grab it from what we sent.
-     const req = buildBody();
-     sceneDataPlayback = { hand_flat: req.hand_flat || [], obj_rt: req.obj_rt || [] };
-  }
+  totalFrames = d.window_size;
+  const req = buildBody();
+  sceneDataPlayback = { hand_flat: req.hand_flat || [], obj_rt: req.obj_rt || [] };
   
   document.getElementById('timeSlider').max = totalFrames - 1;
   document.getElementById('lblTimeEnd').textContent = `t=${totalFrames-1}`;
-  if (playbackTimer) togglePlayback(); // reset
-  render3DFrame(); // draw first frame
+  if (playbackTimer) togglePlayback(); 
+  render3DFrame();
 
   const statHtml = `
     <div class="card">
-      <p class="card-title">Prediction at Window End</p>
       <div class="hero-pred">
         <div class="pred-ring ${d.ghost_triggered?'ghost':''}">${d.ghost_triggered?'👻':'🧠'}</div>
-        <div>
-          <div class="pred-name">${d.pred_name}</div>
-          <div class="pred-sub">Class ${d.pred_class} of 36</div>
-        </div>
+        <div><div class="pred-name">${d.pred_name}</div><div class="pred-sub">Class ${d.pred_class}</div></div>
         <div class="conf-badge ${cc}">${pct}%</div>
       </div>
     </div>
-
-    <div class="ghost-banner ${d.ghost_triggered?'on':'off'}">
-      <div class="gdot"></div>
-      ${d.ghost_triggered
-        ? `👻 Ghost Target TRIGGERED — confidence ${pct}% ≥ 65% threshold`
-        : `Ghost Target dormant — confidence ${pct}% < 65% (threshold not met)`}
-    </div>
-
-    <div class="card">
+    <div class="card" style="margin-top:12px;">
       <p class="card-title">Key Metrics</p>
       <div class="metric-grid">
-        <div class="mcard"><div class="mv">${pct}<span style="font-size:13px">%</span></div><div class="ml">Confidence</div></div>
-        <div class="mcard"><div class="mv">${d.ttc_seconds.toFixed(2)}<span style="font-size:13px">s</span></div><div class="ml">Time-to-Contact</div></div>
-        <div class="mcard"><div class="mv">${Math.round(d.obs_ratio*100)}<span style="font-size:13px">%</span></div><div class="ml">Obs. Ratio</div></div>
+        <div class="mcard"><div class="mv">${pct}%</div><div class="ml">Confidence</div></div>
+        <div class="mcard"><div class="mv">${d.ttc_seconds.toFixed(2)}s</div><div class="ml">TTC</div></div>
       </div>
-    </div>
-
-    <div class="card">
-      <p class="card-title">Top-5 Predictions</p>
-      <div class="top5" id="top5List"></div>
     </div>
   `;
   document.getElementById('inferStatsTarget').innerHTML = statHtml;
-  
-  // top 5 render
-  const t5 = document.getElementById('top5List');
-  const mx = d.top5[0].prob;
-  d.top5.forEach((item,i) => {
-    const pct2 = mx>0?(item.prob/mx*100):0;
-    const el = document.createElement('div');
-    el.className='t5i'; el.style.animationDelay=`${i*60}ms`;
-    el.innerHTML=`<span class="t5r">#${item.rank}</span>
-      <div class="t5w">
-        <div class="t5l">${item.class_name}</div>
-        <div class="t5bg"><div class="t5fill" id="bar${i}" style="width:0%"></div></div>
-      </div>
-      <span class="t5p">${(item.prob*100).toFixed(1)}%</span>`;
-    t5.appendChild(el);
-    setTimeout(()=>{
-       const b = document.getElementById(`bar${i}`);
-       if(b) b.style.width=pct2+'%'; 
-    }, 50+i*60);
-  });
 }
 
 /* ─────────────────────────────────────────
-   Toast
-───────────────────────────────────────── */
-function showToast(msg) {
-  const t=document.getElementById('toast');
-  t.textContent=msg; t.style.display='block';
-  setTimeout(()=>t.style.display='none',4000);
+   Sliding Window Simulation
+   ───────────────────────────────────────── */
+async function runSlidingSimulation() {
+  const idx = document.getElementById('slidingSelect').value;
+  if (!idx) { showToast('Select a sequence first!'); return; }
+  
+  const buffer = document.getElementById('slidingBuffer').value;
+  const sim = document.getElementById('slidingSim').value;
+  const limit = document.getElementById('slidingLimit').value;
+  
+  const btn = document.getElementById('btnRunSliding');
+  const prog = document.getElementById('slidingProgress');
+  const sum = document.getElementById('slidingSummary');
+  
+  prog.style.display = 'block';
+  sum.style.display = 'none';
+  btn.disabled = true;
+  
+  try {
+     const url = `/api/sliding_window/${idx}?buffer=${buffer}&sim=${sim}&obs_limit=${limit}`;
+     const res = await fetch(url).then(r=>r.json());
+     if (res.error) throw new Error(res.error);
+     
+     document.getElementById('sAcc').textContent = (res.frame_wise_accuracy * 100).toFixed(1) + '%';
+     document.getElementById('sStab').textContent = (res.stability * 100).toFixed(1) + '%';
+     document.getElementById('sConv').textContent = (res.convergence_point / 30).toFixed(2) + 's';
+     document.getElementById('sPose').textContent = res.mean_pose_error.toFixed(4) + 'm';
+     
+     sum.style.display = 'flex';
+     renderSlidingTimeline(res);
+  } catch(e) { showToast('Simulation failed: ' + e.message); }
+  finally { prog.style.display = 'none'; btn.disabled = false; }
 }
+
+function renderSlidingTimeline(data) {
+    window.lastSlidingData = data;
+    document.getElementById('card3D').style.display = 'block';
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('resultContent').style.display = 'flex';
+    document.getElementById('resSrcTag').textContent = `🌊 Multi-Head Simulation: ${data.path}`;
+    
+    // Initialize 3D Playback for the whole simulation
+    const allHandFlat = data.gt_poses.flatMap(pose => pose.flat(Infinity));
+    const allObjRt = data.gt_obj_poses.flatMap(mat => mat.flat(Infinity));
+    sceneDataPlayback = { hand_flat: allHandFlat, obj_rt: allObjRt };
+    totalFrames = data.gt_poses.length;
+    currentFrame = 0;
+    
+    // Update Slider UI
+    const tSlider = document.getElementById('timeSlider');
+    if (tSlider) {
+      tSlider.max = totalFrames - 1;
+      tSlider.value = 0;
+    }
+    document.getElementById('lblTimeEnd').textContent = `t=${totalFrames-1}`;
+    render3DFrame();
+
+    document.getElementById('inferStatsTarget').innerHTML = `
+      <div class="card" style="margin-bottom:16px;"><p class="card-title">Intent Prediction Timeline</p><div id="timelinePlot" style="height:240px;"></div></div>
+      <div class="card" style="margin-bottom:16px;"><p class="card-title">Coordinate Accuracy (MPJPE)</p><div id="posePlot" style="height:220px;"></div></div>
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+           <p class="card-title" style="margin-bottom:0;">🔍 Frame-by-Frame Pose Review</p>
+           <div style="display:flex; gap:10px; align-items:center;">
+              <input type="range" id="frameSlider" min="0" max="${data.predictions.length-1}" value="0" style="width:200px;" oninput="updateSlidingFrame(this.value)">
+              <span id="frameCounter" style="font-family:monospace; font-weight:bold;">0</span>
+           </div>
+        </div>
+        <div style="max-height:300px; overflow-y:auto; margin-top:12px; background:var(--bg3); border-radius:8px;">
+           <table style="width:100%; font-size:11px; text-align:left; border-collapse:collapse;">
+             <thead style="position:sticky; top:0; background:var(--bg2);">
+                <tr><th style="padding:8px;">Joint</th><th>GT (XYZ)</th><th>Pred (XYZ)</th><th>Diff (mm)</th></tr>
+             </thead>
+             <tbody id="jointTableBody"></tbody>
+           </table>
+        </div>
+      </div>`;
+    
+    const x = Array.from({length: data.predictions.length}, (_, i) => i);
+    
+    // 1. Intent Timeline
+    const traceGT = {
+        x: x, y: data.ground_truth, mode: 'lines', name: 'GT',
+        line: { color: '#22c55e', width: 2 },
+        text: data.ground_truth.map(v => ACTION_LABELS[v]),
+        hovertemplate: 'Frame %{x}<br>GT: %{text}<extra></extra>'
+    };
+    const tracePred = {
+        x: x, y: data.predictions, mode: 'markers', name: 'Pred',
+        marker: { color: '#6366f1', size: 4, opacity: 0.7 },
+        text: data.predictions.map(v => ACTION_LABELS[v]),
+        hovertemplate: 'Frame %{x}<br>Pred: %{text}<extra></extra>'
+    };
+    
+    Plotly.newPlot('timelinePlot', [traceGT, tracePred], {
+        margin: { l: 120, r: 20, b: 40, t: 10 },
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0.2)',
+        font: { color: '#94a3b8', size: 10 },
+        xaxis: { title: 'Frame Index', gridcolor: '#1e293b' },
+        yaxis: { 
+            tickvals: Array.from(new Set([...data.ground_truth, ...data.predictions])),
+            ticktext: Array.from(new Set([...data.ground_truth, ...data.predictions])).map(v => ACTION_LABELS[v]),
+            gridcolor: '#1e293b'
+        },
+        hovermode: 'x unified',
+        showlegend: true,
+        legend: { orientation: 'h', y: 1.1 }
+    }, { displayModeBar: false });
+
+    // 2. MPJPE Plot
+    Plotly.newPlot('posePlot', [
+        {
+            x: x, y: data.pose_errors, mode: 'lines', fill: 'tozeroy', name: 'Error',
+            line: { color: '#f59e0b', width: 2 },
+            fillcolor: 'rgba(245, 158, 11, 0.1)',
+            hovertemplate: 'Frame %{x}<br>Error: %{y:.4f}m<extra></extra>'
+        },
+        {
+            x: [0, x.length-1], y: [0.02, 0.02], mode: 'lines', name: 'Threshold (20mm)',
+            line: { color: '#ef4444', width: 1, dash: 'dash' }
+        }
+    ], {
+        margin: { l: 60, r: 20, b: 40, t: 10 },
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0.2)',
+        font: { color: '#94a3b8', size: 10 },
+        xaxis: { title: 'Frame Index', gridcolor: '#1e293b' },
+        yaxis: { title: 'Error (m)', gridcolor: '#1e293b' },
+        hovermode: 'x unified'
+    }, { displayModeBar: false });
+}
+
+function updateSlidingFrame(val) {
+   const idx = parseInt(val);
+   currentFrame = idx; // Update shared frame state 
+   document.getElementById('frameCounter').textContent = idx;
+   const d = window.lastSlidingData;
+   if (!d) return;
+   const gt = d.gt_poses[idx];
+   const pred = d.predicted_poses[idx];
+   const tbody = document.getElementById('jointTableBody');
+   let html = '';
+   for(let h=0; h<2; h++){
+      for(let j=0; j<21; j++){
+         const off = (h*21 + j) * 3;
+         const g = [gt[off], gt[off+1], gt[off+2]];
+         const p = pred[h][j];
+         const dist = Math.sqrt(Math.pow(g[0]-p[0],2)+Math.pow(g[1]-p[1],2)+Math.pow(g[2]-p[2],2))*1000;
+         html += `<tr><td style="padding:4px 8px;">${h===0?'L':'R'} ${JOINT_NAMES[j]}</td>
+                  <td>${g.map(v=>v.toFixed(3)).join(',')}</td>
+                  <td style="color:#22c55e;">${p.map(v=>v.toFixed(3)).join(',')}</td>
+                  <td style="color:${dist>20?'#ef4444':'#22c55e'}">${dist.toFixed(1)}</td></tr>`;
+      }
+   }
+   tbody.innerHTML = html;
+   
+   // Update Ghost Hand with its prediction for THIS frame
+   window.lastInferenceData = { ghost_triggered: true, pred_pose: pred.flat(Infinity) };
+   
+   render3DFrame();
+}
+
+/* ─────────────────────────────────────────
+   3D Rendering & Utilities
+   ───────────────────────────────────────── */
+async function loadDatasetSample(val) {
+   const idx = parseInt(val);
+   try {
+     // Requesting with full sequence parameters to match Simulation style logic
+     const data = await fetch(`/api/real_data/${idx}?full=1`).then(r=>r.json());
+     if (data.error) throw new Error(data.error);
+     
+     loadedDatasetData = data;
+     // Simulation uses gt_poses (list of lists), Explorer uses raw_hand_flat (flat list)
+     // We ensure they are both flat for sceneDataPlayback
+     sceneDataPlayback = { 
+        hand_flat: data.raw_hand_flat.flat(), 
+        obj_rt: data.obj_rt.flat() 
+     };
+     
+     // Update Metadata Display
+     document.getElementById('datasetDetails').style.display = 'flex';
+     document.getElementById('dsTrueAction').textContent = data.action_name;
+     document.getElementById('dsLength').textContent = data.T;
+     
+     // Update Results Header
+     document.getElementById('emptyState').style.display = 'none';
+     document.getElementById('resultContent').style.display = 'flex';
+     document.getElementById('card3D').style.display = 'block';
+     document.getElementById('resSrcTag').textContent = `🗄 Dataset Sample: ${data.action_name} (idx=${idx})`;
+     
+     // Initialize 3D State
+     totalFrames = data.T;
+     currentFrame = 0;
+     
+     // Sync Slider
+     const tSlider = document.getElementById('timeSlider');
+     tSlider.max = totalFrames - 1;
+     tSlider.value = 0;
+     document.getElementById('lblTimeEnd').textContent = `t=${totalFrames-1}`;
+     
+     // Clear Ghost
+     window.lastInferenceData = null;
+     
+     render3DFrame();
+     showToast(`Loaded: ${data.action_name}`);
+   } catch(e) { showToast("Error loading: " + e.message); }
+}
+
+function parseObjRt(arr, t) {
+  if (!arr || arr.length < (t*16+16)) return null;
+  const o = t*16;
+  return [ [arr[o], arr[o+1], arr[o+2], arr[o+3]], [arr[o+4], arr[o+5], arr[o+6], arr[o+7]], 
+           [arr[o+8], arr[o+9], arr[o+10], arr[o+11]], [arr[o+12], arr[o+13], arr[o+14], arr[o+15]] ];
+}
+
+function render3DFrame() {
+  if (!sceneDataPlayback) return;
+  const t = currentFrame;
+  const hf = sceneDataPlayback.hand_flat;
+  const off = t*126;
+  const traces = [];
+  const FINGERS = [[0,1,2,3,4], [0,5,6,7,8], [0,9,10,11,12], [0,13,14,15,16], [0,17,18,19,20]];
+
+  for(let h=0; h<2; h++){
+    const ho = h*63;
+    const handColor = h===0 ? '#ec4899' : '#06b6d4';
+    const handName = h===0 ? 'Left Hand' : 'Right Hand';
+    for(let i=0; i<FINGERS.length; i++){
+      const f = FINGERS[i];
+      let tx=[], ty=[], tz=[];
+      for(const j of f){ tx.push(hf[off+ho+j*3]); ty.push(hf[off+ho+j*3+1]); tz.push(hf[off+ho+j*3+2]); }
+      traces.push({x:tx, y:ty, z:tz, mode:'lines+markers', type:'scatter3d', marker:{size:3, color:handColor}, line:{width:3, color:handColor}, name:handName, showlegend:i===0});
+    }
+  }
+
+  // Ghost
+  // Ghost & Metrics Logic for Sliding Window Simulation
+  if (activeTab === 'sliding' && window.lastSlidingData) {
+      const d = window.lastSlidingData;
+      const pred_pose = d.predicted_poses[t];
+      const gt_pose = d.gt_poses[t];
+      
+      // Update Ghost Hand (always show prediction in simulation mode)
+      if (pred_pose) {
+          for(let h=0; h<2; h++){
+              const ho = h*63;
+              const ghostName = h===0 ? 'L Ghost' : 'R Ghost';
+              for(let i=0; i<FINGERS.length; i++){
+                  const f = FINGERS[i];
+                  let tx=[], ty=[], tz=[];
+                  for(const j of f){ 
+                      const p = pred_pose[h][j];
+                      tx.push(p[0]); ty.push(p[1]); tz.push(p[2]); 
+                  }
+                  traces.push({x:tx, y:ty, z:tz, mode:'lines+markers', type:'scatter3d', 
+                               marker:{size:2, color:'#22c55e', opacity:0.4}, 
+                               line:{width:2, color:'#22c55e', opacity:0.4}, 
+                               name:ghostName, showlegend:i===0});
+              }
+          }
+      }
+
+      // Update Joint Table if it exists
+      const tbody = document.getElementById('jointTableBody');
+      if (tbody) {
+          let html = '';
+          for(let h=0; h<2; h++){
+              for(let j=0; j<21; j++){
+                  // gt_pose and pred_pose are nested [2][21][3]
+                  const g = gt_pose[h][j]; 
+                  const p = pred_pose[h][j];
+                  
+                  if (!g || !p) continue;
+
+                  const dist = Math.sqrt(Math.pow(g[0]-p[0],2)+Math.pow(g[1]-p[1],2)+Math.pow(g[2]-p[2],2))*1000;
+                  html += `<tr><td style="padding:4px 8px;">${h===0?'L':'R'} ${JOINT_NAMES[j]}</td>
+                           <td>${g.map(v=>v.toFixed(3)).join(',')}</td>
+                           <td style="color:#22c55e;">${p.map(v=>v.toFixed(3)).join(',')}</td>
+                           <td style="color:${dist>20?'#ef4444':'#22c55e'}">${dist.toFixed(1)}</td></tr>`;
+              }
+          }
+          tbody.innerHTML = html;
+          const counter = document.getElementById('frameCounter');
+          if (counter) counter.textContent = t;
+          const fSlider = document.getElementById('frameSlider');
+          if (fSlider) fSlider.value = t;
+
+          // Update Chart Indicators
+          const update = { shapes: [{ type: 'line', x0: t, x1: t, y0: 0, y1: 1, yref: 'paper', line: { color: 'white', width: 2, dash: 'dot' } }] };
+          Plotly.relayout('timelinePlot', update);
+          Plotly.relayout('posePlot', update);
+      }
+  } 
+  // Legacy logic for manual inference
+  else if (window.lastInferenceData && window.lastInferenceData.ghost_triggered) {
+    const gh = window.lastInferenceData.pred_pose;
+    if (gh) {
+      for(let h=0; h<2; h++){
+        const ho = h*63;
+        const ghostName = h===0 ? 'L Ghost' : 'R Ghost';
+        for(let i=0; i<FINGERS.length; i++){
+          const f = FINGERS[i];
+          let tx=[], ty=[], tz=[];
+          for(const j of f){ tx.push(gh[ho+j*3]); ty.push(gh[ho+j*3+1]); tz.push(gh[ho+j*3+2]); }
+          traces.push({x:tx, y:ty, z:tz, mode:'lines+markers', type:'scatter3d', marker:{size:2, color:'#22c55e', opacity:0.4}, line:{width:2, color:'#22c55e', opacity:0.4}, name:ghostName, showlegend:i===0});
+        }
+      }
+    }
+  }
+
+  const mat = parseObjRt(sceneDataPlayback.obj_rt, t);
+  if (mat) {
+    const s=0.04; const c=[[-s,-s,-s],[s,-s,-s],[s,s,-s],[-s,s,-s],[-s,-s,s],[s,-s,s],[s,s,s],[-s,s,s]];
+    const pts=c.map(p=>[p[0]*mat[0][0]+p[1]*mat[0][1]+p[2]*mat[0][2]+mat[0][3], p[0]*mat[1][0]+p[1]*mat[1][1]+p[2]*mat[1][2]+mat[1][3], p[0]*mat[2][0]+p[1]*mat[2][1]+p[2]*mat[2][2]+mat[2][3]]);
+    const eds=[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+    let bx=[], by=[], bz=[];
+    eds.forEach(e=>{ bx.push(pts[e[0]][0],pts[e[1]][0],null); by.push(pts[e[0]][1],pts[e[1]][1],null); bz.push(pts[e[0]][2],pts[e[1]][2],null); });
+    traces.push({x:bx,y:by,z:bz, mode:'lines', type:'scatter3d', line:{color:'#f59e0b', width:4}, name:'Object', showlegend:true});
+  }
+
+  Plotly.react('vis3d', traces, { 
+    margin:{l:0,r:0,b:0,t:0}, 
+    paper_bgcolor:'rgba(0,0,0,0)', 
+    scene:{
+      xaxis:{showgrid:false, showticklabels:false, autorange: true}, 
+      yaxis:{showgrid:false, showticklabels:false, autorange: true}, 
+      zaxis:{showgrid:false, showticklabels:false, autorange: true}, 
+      aspectmode:'data'
+    }, 
+    showlegend:true, 
+    legend:{x:0, y:1, font:{color:'white', size:10}, bgcolor:'rgba(0,0,0,0)'} 
+  }, {displayModeBar:false});
+  document.getElementById('lblTimeCur').textContent = `Frame ${t}`;
+  document.getElementById('timeSlider').value = t;
+}
+
+function togglePlayback() {
+  const btn = document.getElementById('btnPlayPause');
+  if (playbackTimer) { clearInterval(playbackTimer); playbackTimer=null; btn.textContent='▶ Play'; }
+  else { 
+    if (currentFrame >= totalFrames-1) currentFrame=0;
+    btn.textContent='⏸ Pause';
+    playbackTimer = setInterval(()=>{ currentFrame++; if(currentFrame>=totalFrames){ currentFrame=totalFrames-1; togglePlayback(); } render3DFrame(); }, 100);
+  }
+}
+function onTimeSliderChange(v){ currentFrame=parseInt(v); if(playbackTimer) togglePlayback(); render3DFrame(); }
+
+/* file processing markers removed */
+
+function showToast(m){ const t=document.getElementById('toast'); t.textContent=m; t.style.display='block'; setTimeout(()=>t.style.display='none',3000); }
 
 boot();
 </script>

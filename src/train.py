@@ -72,37 +72,52 @@ def get_device() -> torch.device:
 # One epoch of training
 # ─────────────────────────────────────────────────────────
 
-def train_one_epoch(model, loader, optimizer, criterion, device, scaler=None):
+def train_one_epoch(model, loader, optimizer, criterion, device, scaler=None, pose_weight=5.0):
     model.train()
-    total_loss, correct, total = 0.0, 0, 0
+    total_loss, total_intent_loss, total_pose_loss = 0.0, 0.0, 0.0
+    correct, total = 0, 0
+
+    mse_loss = torch.nn.MSELoss()
 
     for batch in loader:
         hand   = batch["hand_flat"].to(device, non_blocking=True)   # (B, T, 126)
         obj    = batch["obj_rt"].to(device,    non_blocking=True)   # (B, T, 16)
         obs    = batch["obs_ratio"].to(device, non_blocking=True)   # (B,)
         labels = batch["label"].to(device,     non_blocking=True)   # (B,)
+        target_pose = batch["target_pose"].to(device, non_blocking=True) # (B, 126)
+
+        # ── Data Augmentation: Add subtle Gaussian noise ──────
+        if model.training:
+            # 2mm noise standard deviation (0.002m)
+            hand = hand + torch.randn_like(hand) * 0.002
 
         optimizer.zero_grad(set_to_none=True)
 
-        if scaler is not None:                              # AMP (CUDA only)
-            with torch.autocast("cuda"):
-                logits = model(hand, obj, obs)
-                loss   = criterion(logits, labels, obs)
+        # ── Forward Pass ──────────────────────────────────────
+        # IntentFormer now returns a tuple (logits, pred_pose)
+        logits, pred_pose = model(hand, obj, obs)
+        
+        # ── Multi-task Loss ───────────────────────────────────
+        intent_loss = criterion(logits, labels, obs)
+        pose_loss   = mse_loss(pred_pose, target_pose)
+        loss        = intent_loss + pose_weight * pose_loss
+
+        if scaler is not None:                              # AMP (CUDA/MPS)
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(optimizer)
             scaler.update()
         else:
-            logits = model(hand, obj, obs)
-            loss   = criterion(logits, labels, obs)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
-        total_loss += loss.item() * labels.size(0)
-        correct    += (logits.argmax(1) == labels).sum().item()
-        total      += labels.size(0)
+        total_loss        += loss.item() * labels.size(0)
+        total_intent_loss += intent_loss.item() * labels.size(0)
+        total_pose_loss   += pose_loss.item() * labels.size(0)
+        correct           += (logits.argmax(1) == labels).sum().item()
+        total             += labels.size(0)
 
     return total_loss / total, correct / total
 
@@ -123,8 +138,9 @@ def validate(model, loader, criterion, device, num_classes):
         obs    = batch["obs_ratio"].to(device, non_blocking=True)
         labels = batch["label"].to(device,     non_blocking=True)
 
-        logits = model(hand, obj, obs)
-        loss   = criterion(logits, labels, obs)
+        # Handle tuple output
+        logits, _ = model(hand, obj, obs)
+        loss      = criterion(logits, labels, obs)
 
         total_loss += loss.item() * labels.size(0)
         preds       = logits.argmax(1)
@@ -158,6 +174,8 @@ def build_loaders(args):
             window_size = args.window_size,
             obs_ratios  = obs_ratios,
             num_workers = args.num_workers,
+            dense       = args.dense,
+            stride      = args.stride,
         )
         return train_loader, val_loader, test_loader, H2O_NUM_CLASSES
 
@@ -249,7 +267,8 @@ def train(args):
         t0 = time.time()
 
         train_loss, train_acc = train_one_epoch(
-            model, train_loader, optimizer, criterion, device, scaler
+            model, train_loader, optimizer, criterion, device, scaler,
+            pose_weight=args.pose_weight
         )
         val_loss, val_acc, metrics = validate(
             model, val_loader, criterion, device, num_classes
@@ -321,22 +340,26 @@ def parse_args():
 
     # ── Training hyperparameters ─────────────────────────
     p.add_argument("--out_dir",      default="checkpoints")
-    p.add_argument("--epochs",       type=int,   default=60)
-    p.add_argument("--batch_size",   type=int,   default=64)
-    p.add_argument("--lr",           type=float, default=3e-4)
-    p.add_argument("--weight_decay", type=float, default=1e-4)
+    p.add_argument("--epochs",       type=int,   default=100)
+    p.add_argument("--batch_size",   type=int,   default=128)
+    p.add_argument("--lr",           type=float, default=2e-4)
+    p.add_argument("--weight_decay", type=float, default=1e-2)
     p.add_argument("--window_size",  type=int,   default=30)
-    p.add_argument("--obs_ratios",   default="0.2,0.25,0.3",
+    p.add_argument("--obs_ratios",   default="0.2,0.25,0.3,0.4,0.5",
                    help="Comma-separated observation ratios")
+    p.add_argument("--dense",        action="store_true",
+                   help="If set, samples windows throughout the action (sliding window train)")
+    p.add_argument("--stride",       type=int,   default=5,
+                   help="Stride for dense sampling")
 
     # ── Model hyperparameters ────────────────────────────
-    p.add_argument("--d_model",      type=int,   default=128)
-    p.add_argument("--nhead",        type=int,   default=4)
-    p.add_argument("--num_layers",   type=int,   default=4)
-    p.add_argument("--dim_ff",       type=int,   default=512)
+    p.add_argument("--d_model",      type=int,   default=256)
+    p.add_argument("--nhead",        type=int,   default=8)
+    p.add_argument("--num_layers",   type=int,   default=6)
+    p.add_argument("--dim_ff",       type=int,   default=1024)
     p.add_argument("--dropout",      type=float, default=0.1)
-    p.add_argument("--ep_alpha",     type=float, default=2.0,
-                   help="Early-prediction loss penalty strength")
+    p.add_argument("--ep_alpha",     type=float, default=2.0)
+    p.add_argument("--pose_weight",  type=float, default=5.0)
     p.add_argument("--num_workers",  type=int,   default=4)
 
     return p.parse_args()
