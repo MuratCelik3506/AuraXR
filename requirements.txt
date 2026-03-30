@@ -16,6 +16,10 @@ pandas>=2.1.0         # for metrics csv optional analysis
 huggingface_hub>=0.23.0    # hf_hub_download, snapshot_download
 webdataset>=0.2.86         # WebDataset tar-based loading (optional)
 
+# ── Real-time inference & visualization ──────────────────
+mediapipe>=0.10.0     # Hand pose estimation
+opencv-python>=4.8.0  # Computer vision & webcam
+
 # ── Optional – faster data loading ───────────────────────
 # psutil>=5.9.0
 

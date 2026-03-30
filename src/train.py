@@ -233,7 +233,7 @@ def train(args):
 
     # ── Model ─────────────────────────────────────────────
     model = IntentFormer(
-        input_dim       = 126 + 16,
+        input_dim       = 378 + 16,     # (126*3) hand + 16 obj_rt
         d_model         = args.d_model,
         nhead           = args.nhead,
         num_layers      = args.num_layers,

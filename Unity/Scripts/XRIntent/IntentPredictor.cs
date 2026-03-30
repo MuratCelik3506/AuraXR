@@ -38,6 +38,7 @@ namespace XRIntent
         public float[] Probabilities;   // full distribution (36 elements)
         public float ObsRatio;          // observation ratio used
         public float TTC;               // estimated Time-to-Contact (seconds)
+        public float[] PredPose;        // predicted next-frame joints (126 elements)
         public long  InferenceLatencyUs;// inference latency in microseconds
     }
 
@@ -88,7 +89,8 @@ namespace XRIntent
         // ── Internal state ───────────────────────────────────────
         private const int NumJoints   = 21;
         private const int NumHands    = 2;
-        private const int HandFlatDim = NumHands * NumJoints * 3; // 126
+        private const int PosDim      = NumHands * NumJoints * 3; // 126
+        private const int HandFlatDim = PosDim * 3;               // 378 (pos + vel + acc)
         private const int ObjRtDim    = 16;
         private const int NumClasses  = 36;
 
@@ -162,7 +164,7 @@ namespace XRIntent
 
         private float[] BuildHandFlat()
         {
-            float[] flat = new float[HandFlatDim];
+            float[] flat = new float[PosDim];
 
             // Left hand: joints 0..62 (21 × 3)
             if (leftHandProvider != null)
@@ -197,23 +199,46 @@ namespace XRIntent
             return flat;
         }
 
+            return flat;
+        }
+
         // ── Sentis inference ──────────────────────────────────────
 
         private void RunInference()
         {
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
 
-            // Flatten the circular buffer into (1, T, D) tensors
-            float[] handFlats = new float[windowSize * HandFlatDim];
-            float[] objRts    = new float[windowSize * ObjRtDim];
+            // 1. Prepare Kinematic Features (T, 378)
+            float[] kinematicBuffer = new float[windowSize * HandFlatDim];
+            float[][] bufferArray = _handBuffer.ToArray();
 
-            int i = 0;
-            foreach (float[] h in _handBuffer)
+            for (int t = 0; t < windowSize; t++)
             {
-                Array.Copy(h, 0, handFlats, i * HandFlatDim, HandFlatDim);
-                i++;
+                // Position (0..125)
+                Array.Copy(bufferArray[t], 0, kinematicBuffer, t * HandFlatDim, PosDim);
+                
+                // Velocity (126..251): x[t] - x[t-1]
+                if (t > 0)
+                {
+                    for (int d = 0; d < PosDim; d++)
+                        kinematicBuffer[t * HandFlatDim + PosDim + d] = 
+                            bufferArray[t][d] - bufferArray[t-1][d];
+                }
+                
+                // Acceleration (252..377): v[t] - v[t-1]
+                if (t > 1)
+                {
+                    for (int d = 0; d < PosDim; d++)
+                    {
+                        float v_now = bufferArray[t][d] - bufferArray[t-1][d];
+                        float v_prev = bufferArray[t-1][d] - bufferArray[t-2][d];
+                        kinematicBuffer[t * HandFlatDim + 2 * PosDim + d] = v_now - v_prev;
+                    }
+                }
             }
-            i = 0;
+
+            float[] objRts = new float[windowSize * ObjRtDim];
+            int i = 0;
             foreach (float[] o in _objBuffer)
             {
                 Array.Copy(o, 0, objRts, i * ObjRtDim, ObjRtDim);
@@ -222,7 +247,7 @@ namespace XRIntent
 
             // Create Sentis tensors
             using var tHand = new TensorFloat(
-                new TensorShape(1, windowSize, HandFlatDim), handFlats);
+                new TensorShape(1, windowSize, HandFlatDim), kinematicBuffer);
             using var tObj  = new TensorFloat(
                 new TensorShape(1, windowSize, ObjRtDim),   objRts);
             using var tObs  = new TensorFloat(
@@ -234,13 +259,20 @@ namespace XRIntent
             _worker.SetInput("obs_ratio",  tObs);
             _worker.Schedule();
 
-            // Read logits
+            // Read outputs
             using var logitsTensor = _worker.PeekOutput("logits") as TensorFloat;
             logitsTensor?.MakeReadable();
+
+            using var poseTensor = _worker.PeekOutput("pred_pose") as TensorFloat;
+            poseTensor?.MakeReadable();
 
             float[] logits = new float[NumClasses];
             for (int c = 0; c < NumClasses; c++)
                 logits[c] = logitsTensor?[0, c] ?? 0f;
+
+            float[] predPose = new float[PosDim];
+            for (int d = 0; d < PosDim; d++)
+                predPose[d] = poseTensor?[0, d] ?? 0f;
 
             // Softmax
             float[] probs = Softmax(logits);
@@ -262,6 +294,7 @@ namespace XRIntent
                 Probabilities      = probs,
                 ObsRatio           = currentObsRatio,
                 TTC                = EstimateTTC(),
+                PredPose           = predPose,
                 InferenceLatencyUs = latencyUs,
             };
 

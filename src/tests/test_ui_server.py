@@ -71,6 +71,7 @@ def get_model(ckpt_params: dict = None) -> IntentFormer:
         if ckpt_params:
             # Dynamically use checkpoint parameters
             _model = IntentFormer(
+                input_dim       = ckpt_params.get("input_dim", 142),
                 num_classes     = ckpt_params.get("num_classes", NUM_CLASSES),
                 d_model         = ckpt_params.get("d_model", 128),
                 nhead           = ckpt_params.get("nhead", 4),
@@ -79,7 +80,7 @@ def get_model(ckpt_params: dict = None) -> IntentFormer:
                 window_size     = ckpt_params.get("window_size", 30)
             )
         else:
-            _model = IntentFormer(num_classes=NUM_CLASSES)
+            _model = IntentFormer(input_dim=142, num_classes=NUM_CLASSES)
         
         _model.eval()
         _model.to(_device)
@@ -342,6 +343,22 @@ def main():
         ckpt = torch.load(args.checkpoint, map_location=_device)
         state = ckpt.get("model", ckpt)
         
+        # Detect input_dim from checkpoint weight shape
+        lnorm_key = "input_proj.0.weight"   # LayerNorm weight => shape (input_dim,)
+        linear_key = "input_proj.1.weight"  # Linear weight => shape (d_model, input_dim)
+        if lnorm_key in state:
+            detected_input_dim = state[lnorm_key].shape[0]
+        elif linear_key in state:
+            detected_input_dim = state[linear_key].shape[1]
+        else:
+            detected_input_dim = 142  # safe fallback
+        
+        # Detect d_model from linear bias or weight
+        if linear_key in state:
+            detected_d_model = state[linear_key].shape[0]
+        else:
+            detected_d_model = 128
+
         # Determine model params from checkpoint
         # Ultimate run: d_model=512, nhead=16, num_layers=8, dim_ff=2048
         # Optimized v3: d_model=256, nhead=8, num_layers=6, dim_ff=1024
@@ -349,8 +366,9 @@ def main():
         is_v3 = "optimized_v3" in args.checkpoint or "combined_best" in args.checkpoint
 
         ckpt_params = {
+            "input_dim":   detected_input_dim,
             "num_classes": ckpt.get("num_classes", NUM_CLASSES),
-            "d_model":     512 if is_ultimate else (256 if is_v3 else 128),
+            "d_model":     detected_d_model,
             "nhead":       16 if is_ultimate else (8 if is_v3 else 4),
             "num_layers":  8 if is_ultimate else (6 if is_v3 else 4),
             "dim_ff":      2048 if is_ultimate else (1024 if is_v3 else 512),
@@ -359,7 +377,7 @@ def main():
         m = get_model(ckpt_params)
         m.load_state_dict(state, strict=False)
         print(f"[server] Loaded checkpoint: {args.checkpoint}")
-        print(f"[server] Model Config: d_model={ckpt_params['d_model']} classes={ckpt_params['num_classes']}")
+        print(f"[server] Model Config: input_dim={detected_input_dim} d_model={ckpt_params['d_model']} classes={ckpt_params['num_classes']}")
     else:
         print("[server] Using random (untrained) model weights.")
         get_model() # Init default model

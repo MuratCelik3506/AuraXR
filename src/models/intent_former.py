@@ -143,7 +143,7 @@ class IntentFormer(nn.Module):
 
     def __init__(
         self,
-        input_dim:       int = 126 + 16,   # hand_flat + obj_rt
+        input_dim:       int = 378 + 16,   # (126*3) hand + 16 obj_rt
         d_model:         int = 128,
         nhead:           int = 4,
         num_layers:      int = 4,
@@ -200,7 +200,7 @@ class IntentFormer(nn.Module):
             nn.LayerNorm(d_model),
             nn.Linear(d_model, d_model),
             nn.GELU(),
-            nn.Linear(d_model, input_dim - 16), # 126 features (hand only)
+            nn.Linear(d_model, 126),           # always predict 126 positions
         )
 
         self._init_weights()

@@ -130,6 +130,31 @@ def wrist_relative_normalize(joints: np.ndarray) -> np.ndarray:
 
 
 # ─────────────────────────────────────────────────────────
+# Kinematic Extraction (Velocity & Acceleration)
+# ─────────────────────────────────────────────────────────
+
+def compute_kinematics(poses: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Compute velocity and acceleration from a sequence of poses.
+    
+    Args:
+        poses: (F, ...)  sequence of coordinates
+    Returns:
+        vels: (F, ...)  first-order difference (velocity)
+        accs: (F, ...)  second-order difference (acceleration)
+    """
+    # Velocity: v[t] = x[t] - x[t-1], v[0] = 0
+    vels = np.zeros_like(poses)
+    vels[1:] = np.diff(poses, axis=0)
+    
+    # Acceleration: a[t] = v[t] - v[t-1], a[0] = 0
+    accs = np.zeros_like(vels)
+    accs[1:] = np.diff(vels, axis=0)
+    
+    return vels, accs
+
+
+# ─────────────────────────────────────────────────────────
 # Sequence reader
 # ─────────────────────────────────────────────────────────
 
@@ -181,8 +206,13 @@ def load_sequence(seq_dir: str, camera: str = CAMERA_RIG) -> dict:
     # Apply wrist-relative normalization (Section 2 of instruction.md)
     hand_poses = wrist_relative_normalize(hand_poses)
 
+    # Compute kinematics (v, a) on the normalized poses
+    hand_vels, hand_accs = compute_kinematics(hand_poses)
+
     return {
         "hand_poses":    hand_poses,
+        "hand_vels":     hand_vels,
+        "hand_accs":     hand_accs,
         "raw_hand_poses": raw_hand_poses,
         "obj_poses_rt":  obj_poses_rt,
         "action_labels": action_labels,
@@ -216,6 +246,8 @@ def extract_window(
         return None
 
     hand_snippet = seq_data["hand_poses"][obs_start:obs_end]
+    vel_snippet  = seq_data["hand_vels"][obs_start:obs_end]
+    acc_snippet  = seq_data["hand_accs"][obs_start:obs_end]
     obj_snippet  = seq_data["obj_poses_rt"][obs_start:obs_end]
 
     T = hand_snippet.shape[0]
@@ -223,24 +255,32 @@ def extract_window(
     if T < window_size:
         pad = window_size - T
         hand_snippet = np.pad(hand_snippet, ((pad, 0), (0,0), (0,0), (0,0)))
+        vel_snippet  = np.pad(vel_snippet,  ((pad, 0), (0,0), (0,0), (0,0)))
+        acc_snippet  = np.pad(acc_snippet,  ((pad, 0), (0,0), (0,0), (0,0)))
         obj_snippet  = np.pad(obj_snippet,  ((pad, 0), (0,0)))
     else:
         hand_snippet = hand_snippet[-window_size:]
+        vel_snippet  = vel_snippet[-window_size:]
+        acc_snippet  = acc_snippet[-window_size:]
         obj_snippet  = obj_snippet[-window_size:]
 
-    # Flatten both hands to (T, 2*21*3) = (T, 126)
+    # Fuse positions, velocities, and accelerations into (T, 378)
     T_out = hand_snippet.shape[0]
-    hand_flat = hand_snippet.reshape(T_out, -1)           # (T, 126)
+    p_flat = hand_snippet.reshape(T_out, -1)           # (T, 126)
+    v_flat = vel_snippet.reshape(T_out, -1)            # (T, 126)
+    a_flat = acc_snippet.reshape(T_out, -1)            # (T, 126)
+    
+    # Concatenate kinematic features
+    hand_kinematic = np.concatenate([p_flat, v_flat, a_flat], axis=-1) # (T, 378)
 
-    # Next pose for auxiliary task (regression)
-    # Target frame is obs_end (one frame after the window) if it exists
+    # Next pose for auxiliary task (regression) - only position target
     if obs_end < seq_data["num_frames"]:
         target_pose = seq_data["hand_poses"][obs_end].reshape(-1)
     else:
         target_pose = seq_data["hand_poses"][obs_end-1].reshape(-1)
 
     return {
-        "hand_flat":   hand_flat.astype(np.float32),       # (T, 126)
+        "hand_flat":   hand_kinematic.astype(np.float32),   # (T, 378)
         "obj_rt":      obj_snippet.astype(np.float32),     # (T, 16)
         "target_pose": target_pose.astype(np.float32),     # (126,)
         "obs_ratio":   np.float32(obs_ratio),
