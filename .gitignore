@@ -1,0 +1,24 @@
+# Large data files — not tracked in git
+data/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Claude local settings (keep .claude/ but not local overrides)
+.claude/settings.local.json
