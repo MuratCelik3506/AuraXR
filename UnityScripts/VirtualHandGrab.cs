@@ -17,6 +17,12 @@ namespace AuraXR
         public Transform leftHandWrist;
         public Transform rightHandWrist;
 
+        [Header("Physical Controllers (drag OVRCameraRig LeftHandAnchor / RightHandAnchor)")]
+        [Tooltip("Used for grab proximity detection. Defaults to leftHandWrist if left null.")]
+        public Transform leftController;
+        [Tooltip("Used for grab proximity detection. Defaults to rightHandWrist if left null.")]
+        public Transform rightController;
+
         [Header("Grab Settings")]
         [Tooltip("Radius around wrist to search for objects (metres)")]
         public float grabRadius = 0.15f;
@@ -68,15 +74,18 @@ namespace AuraXR
             bool rightGrip = OVRInput.Get(OVRInput.Axis1D.PrimaryHandTrigger,
                                            OVRInput.Controller.RTouch) > gripThreshold;
 
+            Transform leftProximity  = leftController  != null ? leftController  : leftHandWrist;
+            Transform rightProximity = rightController != null ? rightController : rightHandWrist;
+
             if (leftHandWrist != null)
             {
-                HandleHand(leftHandWrist,  ref _heldLeft,  leftGrip,  _leftGripWas,  _leftWristPrev);
+                HandleHand(leftHandWrist, leftProximity,  ref _heldLeft,  leftGrip,  _leftGripWas,  _leftWristPrev);
                 _leftWristPrev  = leftHandWrist.position;
             }
 
             if (rightHandWrist != null)
             {
-                HandleHand(rightHandWrist, ref _heldRight, rightGrip, _rightGripWas, _rightWristPrev);
+                HandleHand(rightHandWrist, rightProximity, ref _heldRight, rightGrip, _rightGripWas, _rightWristPrev);
                 _rightWristPrev = rightHandWrist.position;
             }
 
@@ -95,7 +104,7 @@ namespace AuraXR
 
         // -----------------------------------------------------------------------
 
-        void HandleHand(Transform wrist, ref InteractableObject held,
+        void HandleHand(Transform wrist, Transform proximity, ref InteractableObject held,
                         bool grip, bool gripWas, Vector3 wristPrev)
         {
             bool justPressed  =  grip && !gripWas;
@@ -103,7 +112,7 @@ namespace AuraXR
 
             if (justPressed && held == null)
             {
-                var nearest = FindNearest(wrist.position);
+                var nearest = FindNearest(proximity.position);
                 if (nearest != null)
                 {
                     if (wrist == leftHandWrist)

@@ -1,10 +1,12 @@
 """
-15_export_onnx_unity.py — Re-export GRU checkpoint with GRU unrolled into
-Linear + sigmoid + tanh primitives that Unity AI Inference Engine supports.
+15_export_onnx_unity.py — GRU-ONLY export (ablation baseline).
 
-Unity's com.unity.ai.inference does NOT support the ONNX GRU operator.
-This script replaces nn.GRU with an explicit cell loop, loads the trained
-weights, verifies numerical equivalence, then exports to ONNX opset 15.
+WARNING: This script exports GRUBaseline, NOT IntentFormer.
+         To export IntentFormer for Unity, use 13_export_onnx.py instead.
+
+This script exists because Unity AI Inference does not support the ONNX GRU
+operator. It re-exports a GRU checkpoint with the GRU cell unrolled into
+Linear + sigmoid + tanh primitives that Unity accepts.
 
 Usage:
     cd hot3d_exploration

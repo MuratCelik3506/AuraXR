@@ -86,6 +86,15 @@ namespace AuraXR
             float gripL    = OVRInput.Get(OVRInput.Axis1D.PrimaryHandTrigger,  OVRInput.Controller.LTouch);
             float triggerL = OVRInput.Get(OVRInput.Axis1D.PrimaryIndexTrigger, OVRInput.Controller.LTouch);
 
+#if UNITY_EDITOR
+            // Simulate slowly oscillating grip/trigger so the model sees changing input in Editor play mode.
+            // Remove this block when testing on a real Quest.
+            float t = Time.time;
+            gripL    = Mathf.Abs(Mathf.Sin(t * 0.5f));
+            triggerL = Mathf.Abs(Mathf.Sin(t * 0.3f));
+            posL    += new Vector3(Mathf.Sin(t * 0.4f) * 0.1f, Mathf.Sin(t * 0.25f) * 0.05f, 0f);
+#endif
+
             f[0] = posL.x; f[1] = posL.y; f[2] = posL.z;
             f[3] = rotL.w; f[4] = rotL.x; f[5] = rotL.y; f[6] = rotL.z;
             f[7] = gripL;  f[8] = triggerL;
@@ -97,6 +106,12 @@ namespace AuraXR
             Quaternion rotR = rightControllerTransform != null ? rightControllerTransform.rotation : Quaternion.identity;
             float gripR    = OVRInput.Get(OVRInput.Axis1D.PrimaryHandTrigger,  OVRInput.Controller.RTouch);
             float triggerR = OVRInput.Get(OVRInput.Axis1D.PrimaryIndexTrigger, OVRInput.Controller.RTouch);
+
+#if UNITY_EDITOR
+            gripR    = Mathf.Abs(Mathf.Sin(t * 0.7f));
+            triggerR = Mathf.Abs(Mathf.Sin(t * 0.45f));
+            posR    += new Vector3(-Mathf.Sin(t * 0.35f) * 0.1f, Mathf.Sin(t * 0.2f) * 0.05f, 0f);
+#endif
 
             f[9]  = posR.x; f[10] = posR.y; f[11] = posR.z;
             f[12] = rotR.w; f[13] = rotR.x; f[14] = rotR.y; f[15] = rotR.z;

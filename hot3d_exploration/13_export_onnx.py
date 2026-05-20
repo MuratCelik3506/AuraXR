@@ -110,28 +110,31 @@ def export(args):
 
     OUT_ONNX.parent.mkdir(parents=True, exist_ok=True)
 
-    # Use legacy exporter (dynamo=False) to get a single self-contained .onnx file.
-    # Unity Sentis cannot read the split external-data format produced by the dynamo exporter.
+    # PyTorch 2.9+ dispatches transformer layers through fused C++ kernels
+    # (_transformer_encoder_layer_fwd, _native_multi_head_attention) that the
+    # legacy TorchScript exporter (dynamo=False) cannot decompose into ONNX ops.
+    # The dynamo exporter uses torch.export which fully decomposes all ops.
+    # At ~21 MB the model is well under the 2 GB external-data threshold,
+    # so the output is a single self-contained .onnx file.
     with torch.no_grad():
         torch.onnx.export(
             model,
-            dummy,
+            (dummy,),
             str(OUT_ONNX),
             opset_version=17,
             input_names=["features"],
             output_names=["pose"],
-            dynamic_axes={
-                "features": {0: "batch_size"},
-                "pose":     {0: "batch_size"},
-            },
-            do_constant_folding=True,
-            verbose=False,
-            dynamo=False,
+            dynamo=True,
         )
-    # Remove stale external data file if the previous dynamo export left one
-    stale_data = Path(str(OUT_ONNX) + ".data")
-    if stale_data.exists():
-        stale_data.unlink()
+
+    # dynamo exporter always writes weights to a .onnx.data sidecar.
+    # Unity AI Inference requires a single self-contained file — merge here.
+    sidecar = Path(str(OUT_ONNX) + ".data")
+    if sidecar.exists():
+        import onnx as _onnx
+        merged = _onnx.load(str(OUT_ONNX), load_external_data=True)
+        _onnx.save(merged, str(OUT_ONNX), save_as_external_data=False)
+        sidecar.unlink()
     print(f"Exported: {OUT_ONNX}")
 
     # Companion metadata for Unity runtime

@@ -6,6 +6,13 @@ namespace AuraXR
     /// <summary>
     /// State machine for the kitchen interaction task used in the user study.
     /// States: Idle → PickBottle → PourBottle → PlaceBottle → PickCup → Done
+    ///
+    /// Logical additions:
+    ///   • bottleSnapZone  — PlaceBottle state advances when snap zone reports IsSnapped
+    ///                       (falls back to grip-release check if no zone assigned)
+    ///   • scoreUI         — directly calls TaskScoreUI.StartTask() so the UI is
+    ///                       always in sync regardless of event wiring order
+    ///   • ResetTask()     — public reset method; clears snap zones, restores Idle state
     /// </summary>
     public class ScenarioKitchenTask : MonoBehaviour
     {
@@ -14,6 +21,10 @@ namespace AuraXR
         [Header("Scene Objects")]
         public InteractableObject bottle;
         public InteractableObject cup;
+
+        [Header("Snap Zones")]
+        [Tooltip("Zone where the bottle must be placed. If assigned, PlaceBottle state waits for snap.")]
+        public SnapZone bottleSnapZone;
 
         [Header("State")]
         public TaskState currentState = TaskState.Idle;
@@ -27,6 +38,7 @@ namespace AuraXR
         [Header("References")]
         public AuraXRFeatureAssembler featureAssembler;
         public UITaskDisplay uiDisplay;
+        public TaskScoreUI scoreUI;
         public SoundManager soundManager;
 
         [Tooltip("Distance threshold (m) for hand-to-object proximity to trigger state transitions")]
@@ -37,6 +49,8 @@ namespace AuraXR
         public bool autoStart = false;
 
         private bool _taskStarted = false;
+
+        // ── Unity ─────────────────────────────────────────────────────────────
 
         void Start()
         {
@@ -63,7 +77,11 @@ namespace AuraXR
                     break;
 
                 case TaskState.PlaceBottle:
-                    if (GetRightGrip() < 0.3f)
+                    // Use snap zone if assigned, otherwise fall back to grip-release check
+                    bool placed = bottleSnapZone != null
+                        ? bottleSnapZone.IsSnapped
+                        : GetRightGrip() < 0.3f;
+                    if (placed)
                         ChangeState(TaskState.PickCup);
                     break;
 
@@ -80,20 +98,43 @@ namespace AuraXR
             }
         }
 
+        // ── Public ────────────────────────────────────────────────────────────
+
         public void StartTask()
         {
-            _taskStarted = true;
+            _taskStarted  = true;
             taskStartTime = Time.time;
+
             uiDisplay?.StartTimer();
+            scoreUI?.StartTask();           // sync gameful UI
+
             ChangeState(TaskState.PickBottle);
             Debug.Log("[AuraXR] Kitchen task started.");
         }
+
+        /// <summary>Resets state to Idle and clears all snap zones. Call before a new trial.</summary>
+        public void ResetTask()
+        {
+            _taskStarted  = false;
+            currentState  = TaskState.Idle;
+            taskStartTime = 0f;
+
+            bottleSnapZone?.ClearSnap();
+
+            uiDisplay?.StopTimer();
+            uiDisplay?.UpdateInstruction("");
+
+            Debug.Log("[AuraXR] Kitchen task reset.");
+        }
+
+        // ── Private ───────────────────────────────────────────────────────────
 
         private void ChangeState(TaskState newState)
         {
             currentState = newState;
             onStateChange?.Invoke(newState);
             uiDisplay?.UpdateInstruction(GetInstruction(newState));
+            scoreUI?.OnStateChanged(newState);  // direct call — no event wiring required
 
             if (soundManager != null)
             {
@@ -127,10 +168,10 @@ namespace AuraXR
 
         private string GetInstruction(TaskState state) => state switch
         {
-            TaskState.PickBottle  => "Pick up the bottle with your right hand.",
-            TaskState.PourBottle  => "Tilt the bottle to pour into the cup.",
+            TaskState.PickBottle  => "Pick up the mustard bottle with your right hand.",
+            TaskState.PourBottle  => "Tilt the bottle to pour into the mug.",
             TaskState.PlaceBottle => "Place the bottle back on the table.",
-            TaskState.PickCup     => "Pick up the cup.",
+            TaskState.PickCup     => "Pick up the mug.",
             TaskState.Done        => "Task complete! Thank you.",
             _                     => ""
         };

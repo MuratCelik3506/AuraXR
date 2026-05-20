@@ -94,7 +94,7 @@ class InputProjection(nn.Module):
     """
     def __init__(self, f_in: int, d_model: int, cat_embed_dim: int = 16):
         super().__init__()
-        # The raw feature has category as a float scalar (1 dim per hand, at positions 18 and 24).
+        # The raw feature has category as a float scalar (1 dim per hand, at positions 24 and 31).
         # We subtract 1 float per hand and add cat_embed_dim per hand to get the projected dim.
         f_numeric = f_in - 2 + cat_embed_dim * 2   # replace 2 cat scalars with 2×16 embeddings
         self.cat_emb = ObjectCategoryEmbedding(34, cat_embed_dim)
@@ -107,22 +107,23 @@ class InputProjection(nn.Module):
         """
         B, L, _ = x.shape
 
-        # Extract category IDs (positions 18 and 24 in feature vector)
-        # Feature layout: ctrl0(9) + ctrl1(9) + obj_ctx0(3+3+1=7) + obj_ctx1(7) + visual(64)
-        # Category ID positions: offset 18 (hand0) and offset 25 (hand1) — 0-indexed
-        cat_h0 = x[:, :, 18].long().clamp(0, 33)   # [B, T]
-        cat_h1 = x[:, :, 25].long().clamp(0, 33)   # [B, T]
+        # Extract category IDs from their correct positions in the feature vector.
+        # Layout (from 09_build_dataset.py): ctrl0(9)+ctrl1(9)+centroid_h0(3)+bbox_h0(3)+cat_h0(1)
+        #                                    +centroid_h1(3)+bbox_h1(3)+cat_h1(1)+visual(64)
+        # Category ID positions: 24 (hand0) and 31 (hand1) — 0-indexed
+        cat_h0 = x[:, :, 24].long().clamp(0, 33)   # [B, T]
+        cat_h1 = x[:, :, 31].long().clamp(0, 33)   # [B, T]
 
         # Get category embeddings [B, T, 16]
         cat_ids_flat = torch.stack([cat_h0, cat_h1], dim=-1).reshape(B * L, 2)
         cat_embeds   = self.cat_emb(cat_ids_flat).reshape(B, L, 32)  # 2×16=32
 
-        # Remove the 2 raw category scalars and append embeddings
-        # Feature: [0:18] ctrl+obj_centroid_bbox | [18] cat_h0 | [19:25] obj1 | [25] cat_h1 | [26:96] visual
+        # Remove the 2 raw category scalars and append learned embeddings instead.
+        # Feature: [0:24] ctrl+centroid+bbox_h0 | [24] cat_h0 | [25:31] centroid+bbox_h1 | [31] cat_h1 | [32:96] visual
         numeric = torch.cat([
-            x[:, :, :18],    # controller + obj centroid/bbox for h0
-            x[:, :, 19:25],  # obj centroid/bbox for h1
-            x[:, :, 26:],    # visual (64 dims)
+            x[:, :, :24],    # ctrl0+ctrl1+centroid_h0+bbox_h0 (24 dims)
+            x[:, :, 25:31],  # centroid_h1+bbox_h1 (6 dims)
+            x[:, :, 32:],    # visual (64 dims)
             cat_embeds,       # learned category embeddings (32 dims)
         ], dim=-1)  # [B, T, F_IN - 2 + 32]
 

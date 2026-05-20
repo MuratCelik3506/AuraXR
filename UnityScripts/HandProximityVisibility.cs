@@ -28,8 +28,8 @@ public class HandProximityVisibility : MonoBehaviour
         if (leftController  == null) { Debug.LogError("[HandProximityVisibility] leftController not assigned."); enabled = false; return; }
         if (rightController == null) { Debug.LogError("[HandProximityVisibility] rightController not assigned."); enabled = false; return; }
 
-        _leftHandRenderers  = leftHandRig.GetComponentsInChildren<SkinnedMeshRenderer>();
-        _rightHandRenderers = rightHandRig.GetComponentsInChildren<SkinnedMeshRenderer>();
+        _leftHandRenderers  = leftHandRig.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+        _rightHandRenderers = rightHandRig.GetComponentsInChildren<SkinnedMeshRenderer>(true);
 
         // Collect all renderers on the controller visual and its children automatically
         _leftControllerRenderers  = leftController.GetComponentsInChildren<Renderer>();

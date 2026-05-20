@@ -131,11 +131,30 @@ namespace AuraXR
                 return;
             }
 
-            // 1. Collect normalised feature window
+            // 1. Collect feature window (raw, pre-normalisation)
             featureAssembler.CopyWindowFlat(_flatWindow);
 
             int T = AuraXRFeatureAssembler.WindowFrames;
             int F = AuraXRFeatureAssembler.FeatureDim;
+
+#if UNITY_EDITOR
+            // ── INPUT LOG ────────────────────────────────────────────────────────
+            // Snapshot the latest frame (index T-1) before we overwrite with normalised values.
+            // Layout: [0..2]=posL [3..6]=rotL [7]=gripL [8]=trigL
+            //         [9..11]=posR [12..15]=rotR [16]=gripR [17]=trigR
+            int latestBase = (T - 1) * F;
+            Vector3    dbgPosL = new Vector3(_flatWindow[latestBase+0], _flatWindow[latestBase+1], _flatWindow[latestBase+2]);
+            Quaternion dbgRotL = new Quaternion(_flatWindow[latestBase+4], _flatWindow[latestBase+5], _flatWindow[latestBase+6], _flatWindow[latestBase+3]);
+            float      dbgGripL = _flatWindow[latestBase+7], dbgTrigL = _flatWindow[latestBase+8];
+            Vector3    dbgPosR = new Vector3(_flatWindow[latestBase+9], _flatWindow[latestBase+10], _flatWindow[latestBase+11]);
+            Quaternion dbgRotR = new Quaternion(_flatWindow[latestBase+13], _flatWindow[latestBase+14], _flatWindow[latestBase+15], _flatWindow[latestBase+12]);
+            float      dbgGripR = _flatWindow[latestBase+16], dbgTrigR = _flatWindow[latestBase+17];
+
+            Debug.Log($"[AuraXR|INPUT-L] frame={Time.frameCount}  pos={dbgPosL:F3}  rot={dbgRotL.eulerAngles:F1}  grip={dbgGripL:F2}  trigger={dbgTrigL:F2}");
+            Debug.Log($"[AuraXR|INPUT-R] frame={Time.frameCount}  pos={dbgPosR:F3}  rot={dbgRotR.eulerAngles:F1}  grip={dbgGripR:F2}  trigger={dbgTrigR:F2}");
+#endif
+
+            // 2. Normalise window in-place
             for (int t = 0; t < T; t++)
                 for (int f = 0; f < F; f++)
                 {
@@ -144,28 +163,58 @@ namespace AuraXR
                                        / metaLoader.FeatureStd[f];
                 }
 
-            // 2. Build Sentis input tensor [1, 16, 96]
+            // 3. Build Sentis input tensor [1, 16, 96]
             _inputTensor?.Dispose();
             _inputTensor = new Tensor<float>(new TensorShape(1, T, F), _flatWindow);
 
-            // 3. Run inference
+            // 4. Run inference
             _worker.Schedule(_inputTensor);
             var outputTensor = _worker.PeekOutput("pose") as Tensor<float>;
             using var cpuTensor = outputTensor.ReadbackAndClone();
 
-            // 4. Copy raw output to float[]
+            // 5. Copy raw output (pre-denorm)
             float[] raw = new float[78];
             for (int i = 0; i < 78; i++)
                 raw[i] = cpuTensor[0, i];
 
-            // 5. De-normalise
+#if UNITY_EDITOR
+            // ── RAW OUTPUT LOG (pre-denorm) ───────────────────────────────────────
+            // If these are identical every frame the model is stuck / collapsed to mean.
+            string preL  = $"{raw[0]:F4} {raw[1]:F4} {raw[2]:F4} {raw[3]:F4} {raw[4]:F4}";
+            string preR  = $"{raw[39]:F4} {raw[40]:F4} {raw[41]:F4} {raw[42]:F4} {raw[43]:F4}";
+            string preDL = $"{raw[32]:F4} {raw[33]:F4} {raw[34]:F4}";
+            string preDR = $"{raw[71]:F4} {raw[72]:F4} {raw[73]:F4}";
+            Debug.Log($"[AuraXR|RAW-PRE-DENORM]\n" +
+                      $"  L pose[0..4]: {preL}  delta_t: {preDL}\n" +
+                      $"  R pose[0..4]: {preR}  delta_t: {preDR}");
+#endif
+
+            // 6. De-normalise
             metaLoader.DenormaliseTarget(raw);
 
-            // 6. Decode into raw HandPose structs
+            // 7. Decode into raw HandPose structs
             _rawLeftHand  = DecodeHand(raw, offset: 0);
             _rawRightHand = DecodeHand(raw, offset: 39);
 
-            Debug.Log($"[AuraXR] Infer — L.DeltaPos={_rawLeftHand.DeltaPosition:F2}  R.DeltaPos={_rawRightHand.DeltaPosition:F2}");
+#if UNITY_EDITOR
+            // ── OUTPUT LOG (post-denorm, decoded) ────────────────────────────────
+            string lDeg = string.Join(" ", System.Array.ConvertAll(_rawLeftHand.ManoJointAngles,
+                              a => (a * Mathf.Rad2Deg).ToString("F1")));
+            string rDeg = string.Join(" ", System.Array.ConvertAll(_rawRightHand.ManoJointAngles,
+                              a => (a * Mathf.Rad2Deg).ToString("F1")));
+
+            Debug.Log($"[AuraXR|OUT-L] frame={Time.frameCount}  wristPos={_rawLeftHand.WristPosition:F3}  wristRot={_rawLeftHand.WristRotation.eulerAngles:F1}  deltaPos={_rawLeftHand.DeltaPosition:F4}");
+            Debug.Log($"[AuraXR|OUT-L-FINGERS] {lDeg}");
+            Debug.Log($"[AuraXR|OUT-R] frame={Time.frameCount}  wristPos={_rawRightHand.WristPosition:F3}  wristRot={_rawRightHand.WristRotation.eulerAngles:F1}  deltaPos={_rawRightHand.DeltaPosition:F4}");
+            Debug.Log($"[AuraXR|OUT-R-FINGERS] {rDeg}");
+
+            // ── ANCHOR PLACEMENT LOG ─────────────────────────────────────────────
+            string lCtrl  = featureAssembler.leftControllerTransform  != null ? featureAssembler.leftControllerTransform.position.ToString("F3")  : "NULL";
+            string rCtrl  = featureAssembler.rightControllerTransform != null ? featureAssembler.rightControllerTransform.position.ToString("F3") : "NULL";
+            string lAnchor = virtualHandLeft  != null ? virtualHandLeft.position.ToString("F3")  : "NULL";
+            string rAnchor = virtualHandRight != null ? virtualHandRight.position.ToString("F3") : "NULL";
+            Debug.Log($"[AuraXR|ANCHOR] L ctrl={lCtrl} -> anchor={lAnchor}   R ctrl={rCtrl} -> anchor={rAnchor}");
+#endif
         }
 
         // -----------------------------------------------------------------------

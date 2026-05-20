@@ -69,7 +69,9 @@ from tqdm import tqdm
 DATA_DIR   = Path("../data")
 PRE_DIR    = DATA_DIR / "preprocessed"
 OUT_FILE   = DATA_DIR / "hot3d_training.h5"
-TEST_PIDS  = {"P0004", "P0005", "P0006", "P0008", "P0016", "P0020"}
+# HOT3D official test split (P0004/5/6/8/16/20) has NO MANO labels — withheld for
+# benchmark competition. Use two labeled participants as our held-out test set instead.
+TEST_PIDS  = {"P0009", "P0021"}
 
 T          = 16   # temporal window length
 F_IN       = 96   # feature dim per frame
@@ -77,6 +79,43 @@ T_OUT      = 78   # target dim
 IDENTITY_Q = np.array([1., 0., 0., 0.], dtype=np.float32)
 
 ZERO_FEATURE = np.zeros(F_IN, dtype=np.float32)
+
+
+# Quest 3 controller ring sits ~5 cm proximal, ~2 cm dorsal from palm centre (local frame).
+PALM_TO_CTRL_OFFSET = np.array([0.0, -0.05, 0.02], dtype=np.float32)
+
+
+def _rotate_vec(q_wxyz: np.ndarray, v: np.ndarray) -> np.ndarray:
+    """Rotate vector v by unit quaternion [w,x,y,z]."""
+    w, x, y, z = q_wxyz.astype(np.float64)
+    R = np.array([
+        [1-2*(y*y+z*z),   2*(x*y-w*z),   2*(x*z+w*y)],
+        [  2*(x*y+w*z), 1-2*(x*x+z*z),   2*(y*z-w*x)],
+        [  2*(x*z-w*y),   2*(y*z+w*x), 1-2*(x*x+y*y)],
+    ], dtype=np.float64)
+    return (R @ v.astype(np.float64)).astype(np.float32)
+
+
+def _ctrl_from_wrist(wrist_t: np.ndarray, wrist_q: np.ndarray) -> np.ndarray:
+    """Synthetic controller position = wrist + PALM_TO_CTRL_OFFSET rotated to world frame."""
+    return wrist_t + _rotate_vec(wrist_q, PALM_TO_CTRL_OFFSET)
+
+
+def _quat_conjugate(q: np.ndarray) -> np.ndarray:
+    """Conjugate of unit quaternion [w,x,y,z] → [w,-x,-y,-z]."""
+    return np.array([q[0], -q[1], -q[2], -q[3]], dtype=np.float32)
+
+
+def _quat_mul(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
+    """Multiply two [w,x,y,z] unit quaternions."""
+    w1, x1, y1, z1 = q1
+    w2, x2, y2, z2 = q2
+    return np.array([
+        w1*w2 - x1*x2 - y1*y2 - z1*z2,
+        w1*x2 + x1*w2 + y1*z2 - z1*y2,
+        w1*y2 - x1*z2 + y1*w2 + z1*x2,
+        w1*z2 + x1*y2 - y1*x2 + z1*w2,
+    ], dtype=np.float32)
 ZERO_FEATURE[3]  = 1.  # ctrl_q_h0 w=1
 ZERO_FEATURE[11] = 1.  # ctrl_q_h1 w=1
 
@@ -97,14 +136,14 @@ def build_feature(d: dict, i: int) -> np.ndarray:
     feat = np.zeros(F_IN, dtype=np.float32)
     off = 0
 
-    # Hand 0 controller proxy
-    feat[off:off+3] = d["ctrl_t_h0"][i];      off += 3
+    # Hand 0 controller proxy (synthesised: wrist + PALM_TO_CTRL_OFFSET in world frame)
+    feat[off:off+3] = _ctrl_from_wrist(d["mano_wrist_t_h0"][i], d["ctrl_q_h0"][i]); off += 3
     feat[off:off+4] = d["ctrl_q_h0"][i];      off += 4
     feat[off]       = d["ctrl_grip_h0"][i,0]; off += 1
     feat[off]       = d["ctrl_trigger_h0"][i,0]; off += 1
 
     # Hand 1 controller proxy
-    feat[off:off+3] = d["ctrl_t_h1"][i];      off += 3
+    feat[off:off+3] = _ctrl_from_wrist(d["mano_wrist_t_h1"][i], d["ctrl_q_h1"][i]); off += 3
     feat[off:off+4] = d["ctrl_q_h1"][i];      off += 4
     feat[off]       = d["ctrl_grip_h1"][i,0]; off += 1
     feat[off]       = d["ctrl_trigger_h1"][i,0]; off += 1
@@ -138,10 +177,12 @@ def build_target(d: dict, i: int) -> np.ndarray | None:
     target[off:off+10] = d["mano_betas_h0"][i];  off += 10
     target[off:off+3]  = d["mano_wrist_t_h0"][i]; off += 3
     target[off:off+4]  = d["mano_wrist_q_h0"][i]; off += 4
-    # delta_t_h0 = zero (wrist IS the controller origin for training)
-    target[off:off+3]  = 0.;  off += 3
-    # delta_q_h0 = identity
-    target[off:off+4]  = IDENTITY_Q; off += 4
+    # delta_t_h0: wrist − synthetic_ctrl (≈ −PALM_TO_CTRL_OFFSET rotated to world)
+    _ct0 = _ctrl_from_wrist(d["mano_wrist_t_h0"][i], d["ctrl_q_h0"][i])
+    target[off:off+3]  = d["mano_wrist_t_h0"][i] - _ct0; off += 3
+    # delta_q_h0: rotation from controller frame to wrist frame (≈ identity here)
+    target[off:off+4]  = _quat_mul(_quat_conjugate(d["ctrl_q_h0"][i]),
+                                    d["mano_wrist_q_h0"][i]); off += 4
 
     # Hand 1 (fill with hand 0 values if absent, mask handled by training)
     if d["hand_h1_valid"][i]:
@@ -149,14 +190,18 @@ def build_target(d: dict, i: int) -> np.ndarray | None:
         target[off:off+10] = d["mano_betas_h1"][i];  off += 10
         target[off:off+3]  = d["mano_wrist_t_h1"][i]; off += 3
         target[off:off+4]  = d["mano_wrist_q_h1"][i]; off += 4
+        _ct1 = _ctrl_from_wrist(d["mano_wrist_t_h1"][i], d["ctrl_q_h1"][i])
+        target[off:off+3]  = d["mano_wrist_t_h1"][i] - _ct1; off += 3
+        target[off:off+4]  = _quat_mul(_quat_conjugate(d["ctrl_q_h1"][i]),
+                                        d["mano_wrist_q_h1"][i]); off += 4
     else:
         # Mirror hand 0 as fallback (model will use h1_valid mask during training)
         target[off:off+15] = d["mano_pose_h0"][i];   off += 15
         target[off:off+10] = d["mano_betas_h0"][i];  off += 10
         target[off:off+3]  = d["mano_wrist_t_h0"][i]; off += 3
         target[off:off+4]  = d["mano_wrist_q_h0"][i]; off += 4
-    off += 3   # delta_t_h1 = zero
-    target[off:off+4] = IDENTITY_Q; off += 4
+        off += 3                        # delta_t_h1 = zero (no real h1 data)
+        target[off:off+4] = IDENTITY_Q; off += 4
 
     assert off == T_OUT, f"Target offset mismatch: {off} != {T_OUT}"
     return target
@@ -247,6 +292,9 @@ def compute_normalisation(windows: list[dict]) -> dict:
 
 
 def write_split(hf: h5py.File, split: str, windows: list[dict]):
+    if not windows:
+        print(f"  {split:<6}: 0 windows — skipped")
+        return
     grp = hf.require_group(split)
     N = len(windows)
     feat = np.stack([w["features"] for w in windows])          # [N, T, F_IN]

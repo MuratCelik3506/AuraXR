@@ -19,14 +19,21 @@ Training setup:
   LR        : 1e-4 with cosine annealing decay
   Epochs    : 100 (early stopping on val MPJPE)
   Batch     : 32
-  Checkpoint: data/checkpoints/best.pt
+  Checkpoints:
+    latest.pt          — saved every epoch (safe resume point)
+    best.pt            — saved whenever val MPJPE improves
+    epoch_<N>.pt       — saved every --save_every epochs (default 10)
+
+Auto-resume: if latest.pt exists and --resume is not given, training
+  resumes automatically from latest.pt. Pass --no_resume to start fresh.
 
 Usage:
-    python 11_train.py
-    python 11_train.py --model gru            # use GRU baseline
-    python 11_train.py --model mlp            # use single-frame MLP baseline
+    python 11_train.py                              # auto-resumes if latest.pt exists
+    python 11_train.py --no_resume                  # always start fresh
+    python 11_train.py --resume ../data/checkpoints/epoch_30.pt
+    python 11_train.py --model gru
     python 11_train.py --epochs 200 --batch 64
-    python 11_train.py --resume data/checkpoints/best.pt
+    python 11_train.py --save_every 5              # epoch snapshot every 5 epochs
 """
 
 import argparse
@@ -97,8 +104,6 @@ def compute_losses(
     λ_beta:     float = 0.5,
     λ_wrist_t:  float = 1.0,
     λ_wrist_q:  float = 1.0,
-    λ_delta_t:  float = 0.4,
-    λ_delta_q:  float = 0.4,
     λ_vel:      float = 0.3,
     λ_beta_sm:  float = 0.1,
 ) -> tuple[torch.Tensor, dict]:
@@ -106,6 +111,11 @@ def compute_losses(
     Compute all loss components.
     pred, target: [B, TARGET_DIM]
     Returns (total_loss, loss_dict).
+
+    NOTE: delta_t and delta_q are excluded. In HOT3D, ctrl_t = wrist_t and
+    ctrl_q = wrist_q (no real controller), so delta_t = 0 and delta_q = identity
+    for every sample. After normalisation both collapse to zero vectors, making
+    the geodesic/MSE losses constant (π and 0 respectively) with zero gradient.
     """
     p = model.predict_hand_params(pred)
     g = model.predict_hand_params(target)
@@ -128,15 +138,7 @@ def compute_losses(
     l_wrist_q = (geodesic_quat_loss(p["wrist_q_h0"], g["wrist_q_h0"]) +
                  geodesic_quat_loss(p["wrist_q_h1"], g["wrist_q_h1"])) * 0.5
 
-    # Controller-to-wrist offset
-    l_delta_t = (mse(p["delta_t_h0"], g["delta_t_h0"]) +
-                 mse(p["delta_t_h1"], g["delta_t_h1"])) * 0.5
-
-    l_delta_q = (geodesic_quat_loss(p["delta_q_h0"], g["delta_q_h0"]) +
-                 geodesic_quat_loss(p["delta_q_h1"], g["delta_q_h1"])) * 0.5
-
-    # Velocity smoothness: penalise large changes in pose across the batch
-    # (a proxy for temporal jitter — exact smoothness needs sequence ordering)
+    # Velocity smoothness proxy (batch-level, not true temporal smoothness)
     l_vel = (mse(p["mano_pose_h0"][1:], p["mano_pose_h0"][:-1]) +
              mse(p["mano_pose_h1"][1:], p["mano_pose_h1"][:-1])) * 0.5
 
@@ -148,8 +150,6 @@ def compute_losses(
              λ_beta    * l_beta    +
              λ_wrist_t * l_wrist_t +
              λ_wrist_q * l_wrist_q +
-             λ_delta_t * l_delta_t +
-             λ_delta_q * l_delta_q +
              λ_vel     * l_vel     +
              λ_beta_sm * l_beta_sm)
 
@@ -158,8 +158,6 @@ def compute_losses(
         "beta":    l_beta.item(),
         "wrist_t": l_wrist_t.item(),
         "wrist_q": l_wrist_q.item(),
-        "delta_t": l_delta_t.item(),
-        "delta_q": l_delta_q.item(),
         "vel":     l_vel.item(),
         "beta_sm": l_beta_sm.item(),
         "total":   total.item(),
@@ -207,8 +205,7 @@ def eval_epoch(model, loader, device, use_amp: bool = False):
     model.eval()
     total_loss = 0.
     all_mpjpe  = []
-    loss_comps = {k: 0. for k in ("joint","beta","wrist_t","wrist_q",
-                                   "delta_t","delta_q","vel","beta_sm")}
+    loss_comps = {k: 0. for k in ("joint","beta","wrist_t","wrist_q","vel","beta_sm")}
     n_batches  = 0
     amp_ctx = torch.autocast(device_type=device.type, dtype=torch.float16) if use_amp else contextlib.nullcontext()
     for feat, tgt in loader:
@@ -233,26 +230,32 @@ def eval_epoch(model, loader, device, use_amp: bool = False):
 
 def parse_args():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model",   choices=["intentformer", "gru", "mlp"],
+    ap.add_argument("--model",      choices=["intentformer", "gru", "mlp"],
                     default="intentformer")
-    ap.add_argument("--epochs",  type=int,   default=100)
-    ap.add_argument("--batch",   type=int,   default=32)
-    ap.add_argument("--lr",      type=float, default=1e-4)
-    ap.add_argument("--d_model", type=int,   default=256)
-    ap.add_argument("--workers", type=int,   default=6)
-    ap.add_argument("--resume",  type=str,   default=None)
-    ap.add_argument("--no_norm", action="store_true",
+    ap.add_argument("--epochs",     type=int,   default=100)
+    ap.add_argument("--batch",      type=int,   default=32)
+    ap.add_argument("--lr",         type=float, default=1e-4)
+    ap.add_argument("--d_model",    type=int,   default=256)
+    ap.add_argument("--workers",    type=int,   default=6)
+    ap.add_argument("--resume",     type=str,   default=None,
+                    help="Path to checkpoint to resume from. "
+                         "Omit to auto-resume from latest.pt if it exists.")
+    ap.add_argument("--no_resume",  action="store_true",
+                    help="Always start from scratch, ignoring any existing checkpoints.")
+    ap.add_argument("--save_every", type=int,   default=10,
+                    help="Save a named epoch_<N>.pt snapshot every N epochs (0 = disabled).")
+    ap.add_argument("--no_norm",    action="store_true",
                     help="Disable feature/target normalisation")
-    ap.add_argument("--device",  type=str,   default="auto")
-    ap.add_argument("--patience",type=int,   default=15,
+    ap.add_argument("--device",     type=str,   default="auto")
+    ap.add_argument("--patience",   type=int,   default=15,
                     help="Early stopping patience (epochs without val improvement)")
-    ap.add_argument("--subset",  type=int,   default=None,
+    ap.add_argument("--subset",     type=int,   default=None,
                     help="Use only the first N samples from train and val (POC / smoke test)")
-    ap.add_argument("--no_aug",  action="store_true",
+    ap.add_argument("--no_aug",     action="store_true",
                     help="Disable data augmentation (use for baselines / ablation)")
-    ap.add_argument("--compile", action="store_true",
+    ap.add_argument("--compile",    action="store_true",
                     help="torch.compile the model for faster execution (adds ~1 min warm-up)")
-    ap.add_argument("--amp",     action="store_true",
+    ap.add_argument("--amp",        action="store_true",
                     help="Enable float16 mixed precision (faster on MPS/CUDA)")
     return ap.parse_args()
 
@@ -337,18 +340,63 @@ def main():
 
     CKPT_DIR.mkdir(parents=True, exist_ok=True)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    log_path = LOG_DIR / f"{args.model}_training_log.jsonl"
+    log_path     = LOG_DIR / f"{args.model}_training_log.jsonl"
+    summary_path = LOG_DIR / f"{args.model}_progress.txt"
 
-    if args.resume and Path(args.resume).exists():
-        ckpt = torch.load(args.resume, map_location=device)
+    # ── Auto-resume logic ────────────────────────────────────────────────────
+    # Priority: --resume <path>  >  auto latest.pt  >  fresh start
+    resume_path = None
+    if not args.no_resume:
+        if args.resume:
+            resume_path = Path(args.resume)
+        elif (CKPT_DIR / "latest.pt").exists():
+            resume_path = CKPT_DIR / "latest.pt"
+            print(f"[Auto-resume] Found {resume_path} — resuming automatically.")
+            print(f"  (Pass --no_resume to start from scratch.)")
+
+    if resume_path and resume_path.exists():
+        ckpt = torch.load(resume_path, map_location=device, weights_only=False)
         model.load_state_dict(ckpt["model"])
         optimiser.load_state_dict(ckpt["optimiser"])
-        start_epoch = ckpt.get("epoch", 0) + 1
-        best_mpjpe  = ckpt.get("best_mpjpe", math.inf)
-        print(f"Resumed from epoch {start_epoch}, best MPJPE={best_mpjpe:.2f} mm")
+        if "scheduler" in ckpt:
+            scheduler.load_state_dict(ckpt["scheduler"])
+        start_epoch  = ckpt.get("epoch", 0) + 1
+        best_mpjpe   = ckpt.get("best_mpjpe", math.inf)
+        patience_ctr = ckpt.get("patience_ctr", 0)
+        print(f"[Resume] epoch={start_epoch}  best_mpjpe={best_mpjpe:.2f} mm  "
+              f"patience_ctr={patience_ctr}/{args.patience}")
+    elif args.no_resume:
+        print("[Fresh start] Ignoring any existing checkpoints.")
+    else:
+        print("[Fresh start] No checkpoint found — training from scratch.")
 
-    print(f"\n{'Epoch':>6}  {'Train':>10}  {'Val':>10}  {'MPJPE(mm)':>12}  {'LR':>10}  {'Time':>7}")
-    print("-" * 65)
+    header = (f"{'Epoch':>6}  {'Train':>10}  {'Val':>10}  "
+              f"{'MPJPE(mm)':>12}  {'Best(mm)':>10}  {'LR':>10}  {'Time':>7}  {'Status':>8}")
+    separator = "-" * 80
+    print(f"\n{header}")
+    print(separator)
+
+    # Write header to plain-text progress file (overwrite only on fresh start)
+    progress_mode = "w" if start_epoch == 0 else "a"
+    with open(summary_path, progress_mode) as f:
+        if start_epoch == 0:
+            f.write(f"Training started: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Model: {args.model}  Epochs: {args.epochs}  Batch: {args.batch}\n\n")
+            f.write(header + "\n" + separator + "\n")
+        else:
+            f.write(f"\n[Resumed at epoch {start_epoch}  "
+                    f"{time.strftime('%Y-%m-%d %H:%M:%S')}]\n")
+
+    def _save_ckpt(path):
+        torch.save({
+            "epoch":        epoch,
+            "model":        model.state_dict(),
+            "optimiser":    optimiser.state_dict(),
+            "scheduler":    scheduler.state_dict(),
+            "best_mpjpe":   best_mpjpe,
+            "patience_ctr": patience_ctr,
+            "args":         vars(args),
+        }, path)
 
     for epoch in range(start_epoch, args.epochs):
         t0 = time.time()
@@ -360,54 +408,69 @@ def main():
         lr = scheduler.get_last_lr()[0]
         elapsed = time.time() - t0
 
-        print(f"{epoch+1:>6}  {train_loss:>10.4f}  {val_loss:>10.4f}  "
-              f"{val_mpjpe:>12.2f}  {lr:>10.2e}  {elapsed:>6.1f}s")
+        # ── Checkpoint bookkeeping (update before saving) ────────────────────
+        is_best = val_mpjpe < best_mpjpe
+        if is_best:
+            best_mpjpe   = val_mpjpe
+            patience_ctr = 0
+            status = "★ best"
+        else:
+            patience_ctr += 1
+            status = f"pat {patience_ctr}/{args.patience}"
 
-        # Log
+        row = (f"{epoch+1:>6}  {train_loss:>10.4f}  {val_loss:>10.4f}  "
+               f"{val_mpjpe:>12.2f}  {best_mpjpe:>10.2f}  {lr:>10.2e}  "
+               f"{elapsed:>6.1f}s  {status:>8}")
+        print(row)
+
+        # ── JSONL log ────────────────────────────────────────────────────────
         log_entry = {
-            "epoch": epoch + 1,
-            "train_loss": train_loss,
-            "val_loss":   val_loss,
-            "val_mpjpe":  val_mpjpe,
-            "lr": lr,
+            "epoch":       epoch + 1,
+            "train_loss":  train_loss,
+            "val_loss":    val_loss,
+            "val_mpjpe":   val_mpjpe,
+            "best_mpjpe":  best_mpjpe,
+            "patience_ctr": patience_ctr,
+            "lr":          lr,
+            "elapsed_s":   round(elapsed, 1),
             "augmentation": use_aug,
+            "timestamp":   time.strftime("%Y-%m-%dT%H:%M:%S"),
             **{f"val_{k}": v for k, v in comps.items()},
         }
         with open(log_path, "a") as f:
             f.write(json.dumps(log_entry) + "\n")
 
-        # Checkpoint
-        is_best = val_mpjpe < best_mpjpe
+        # ── Plain-text progress ──────────────────────────────────────────────
+        with open(summary_path, "a") as f:
+            f.write(row + "\n")
+
+        # ── Save best.pt ─────────────────────────────────────────────────────
         if is_best:
-            best_mpjpe   = val_mpjpe
-            patience_ctr = 0
-            torch.save({
-                "epoch":      epoch,
-                "model":      model.state_dict(),
-                "optimiser":  optimiser.state_dict(),
-                "best_mpjpe": best_mpjpe,
-                "args":       vars(args),
-            }, CKPT_DIR / "best.pt")
+            _save_ckpt(CKPT_DIR / "best.pt")
             print(f"  ✓ Saved best.pt  (MPJPE={best_mpjpe:.2f} mm)")
-        else:
-            patience_ctr += 1
 
-        # Always save latest
-        torch.save({
-            "epoch":      epoch,
-            "model":      model.state_dict(),
-            "optimiser":  optimiser.state_dict(),
-            "best_mpjpe": best_mpjpe,
-            "args":       vars(args),
-        }, CKPT_DIR / "latest.pt")
+        # ── Save latest.pt (always — safe resume point) ──────────────────────
+        _save_ckpt(CKPT_DIR / "latest.pt")
 
+        # ── Save epoch snapshot every --save_every epochs ───────────────────
+        if args.save_every > 0 and (epoch + 1) % args.save_every == 0:
+            snap = CKPT_DIR / f"epoch_{epoch+1:04d}.pt"
+            _save_ckpt(snap)
+            print(f"  ↓ Snapshot: {snap.name}")
+
+        # ── Early stopping ───────────────────────────────────────────────────
         if patience_ctr >= args.patience:
             print(f"\n[Early stop] No improvement for {args.patience} epochs.")
             break
 
+    with open(summary_path, "a") as f:
+        f.write(f"\n[Done] Best val MPJPE: {best_mpjpe:.2f} mm  "
+                f"at {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+
     print(f"\n[DONE] Best val MPJPE: {best_mpjpe:.2f} mm")
-    print(f"Checkpoint : {CKPT_DIR / 'best.pt'}")
-    print(f"Log        : {log_path}")
+    print(f"Checkpoints : {CKPT_DIR}/")
+    print(f"JSONL log   : {log_path}")
+    print(f"Progress    : {summary_path}")
     print("Next: run 12_evaluate.py for full MPJPE and contact metrics.")
 
 

@@ -138,6 +138,7 @@ public class ThumbstickLocomotion : MonoBehaviour
 
         foreach (Collider hit in hits)
         {
+            if (hit is MeshCollider mc && !mc.convex) continue;
             Vector3 closest  = hit.ClosestPoint(headPos);
             Vector3 pushDir  = headPos - closest;
             float   overlap  = headRadius - pushDir.magnitude;
