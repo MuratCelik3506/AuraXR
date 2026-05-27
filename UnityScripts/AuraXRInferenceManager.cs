@@ -58,7 +58,7 @@ namespace AuraXR
         [Tooltip("Local-space offset applied to both hands when placing them at the controller anchor. " +
                  "Use this to align the hand mesh visually with the controller tracking origin (white dot). " +
                  "Tune in Inspector while in Play mode — start with (0,0,0) and adjust until the wrist lines up.")]
-        public Vector3 handPivotOffset = Vector3.zero;
+        public Vector3 handPivotOffset = new Vector3(0.1685f, 0f, 0.0351f);
 
         [Header("Inference Rate")]
         [Tooltip("Run inference every N frames to match ~30 FPS training rate at 72 Hz")]
