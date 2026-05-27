@@ -84,9 +84,12 @@ public class HandProximityVisibility : MonoBehaviour
     {
         foreach (var r in renderers)
         {
+            // Set _Color (Standard shader) and _BaseColor (URP Lit) so fade works in both pipelines.
             Color c = r.material.color;
             c.a = alpha;
             r.material.color = c;
+            if (r.material.HasProperty("_BaseColor"))
+                r.material.SetColor("_BaseColor", c);
         }
     }
 
@@ -97,6 +100,8 @@ public class HandProximityVisibility : MonoBehaviour
             Color c = r.material.color;
             c.a = alpha;
             r.material.color = c;
+            if (r.material.HasProperty("_BaseColor"))
+                r.material.SetColor("_BaseColor", c);
         }
     }
 }

@@ -12,6 +12,11 @@ namespace AuraXR
         [Tooltip("Distance at which highlight activates (metres)")]
         public float highlightDistance = 0.15f;
 
+        [Tooltip("Minimum grip value (0–1) required to show highlight. " +
+                 "Prevents false highlight when hand is nearby but not gripping.")]
+        [Range(0f, 1f)]
+        public float gripThreshold = 0.35f;
+
         [Tooltip("Highlight emission colour")]
         public Color highlightColor = new Color(1f, 0.85f, 0f, 1f);
 
@@ -47,10 +52,14 @@ namespace AuraXR
         {
             if (_mat == null) return;
 
-            bool shouldHighlight = CheckHand(leftHandRig,
-                _featureAssembler?.leftControllerTransform)
-                || CheckHand(rightHandRig,
-                _featureAssembler?.rightControllerTransform);
+            // Require BOTH proximity AND sufficient grip — prevents false highlight
+            // when the wrist is nearby but the hand is open.
+            float leftGrip  = _featureAssembler?.LastLeftGrip  ?? 0f;
+            float rightGrip = _featureAssembler?.LastRightGrip ?? 0f;
+
+            bool shouldHighlight =
+                (CheckHand(leftHandRig,  _featureAssembler?.leftControllerTransform)  && leftGrip  >= gripThreshold)
+             || (CheckHand(rightHandRig, _featureAssembler?.rightControllerTransform) && rightGrip >= gripThreshold);
 
             if (shouldHighlight == _isHighlighted) return;
 

@@ -23,7 +23,9 @@ namespace AuraXR
         {
             if (!enableLogging) return;
 
-            string logPath = $"{Application.persistentDataPath}/auraxr_session_{DateTime.Now:yyyy_MM_dd_HH_mm_ss}.csv";
+            string logFolder = System.IO.Path.Combine(Application.persistentDataPath, "Logs");
+            System.IO.Directory.CreateDirectory(logFolder);
+            string logPath = System.IO.Path.Combine(logFolder, $"auraxr_session_{DateTime.Now:yyyy_MM_dd_HH_mm_ss}.csv");
             _csvWriter = new StreamWriter(logPath, false);
             _csvWriter.WriteLine(
                 "timestamp,left_grip,left_trigger,right_grip,right_trigger," +

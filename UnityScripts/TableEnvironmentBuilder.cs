@@ -63,6 +63,12 @@ namespace AuraXR
         /// </summary>
         public SnapZone[] SnapZones { get; private set; }
 
+        /// <summary>
+        /// World-space Y of the table surface top face.
+        /// Use this in AuraXRInferenceManager as the minimum anchor Y floor.
+        /// </summary>
+        public float TableSurfaceY => tablePosition.y + tableHeight + tableTopSize.y * 0.5f;
+
         // ── Unity ─────────────────────────────────────────────────────────────
 
         void Awake()

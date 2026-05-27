@@ -125,8 +125,9 @@ namespace AuraXR
 
         private void Awake()
         {
-            string path = System.IO.Path.Combine(
-                Application.persistentDataPath,
+            string logFolder = System.IO.Path.Combine(Application.persistentDataPath, "Logs");
+            System.IO.Directory.CreateDirectory(logFolder);
+            string path = System.IO.Path.Combine(logFolder,
                 $"handrig_{(isLeftHand ? "L" : "R")}_{System.DateTime.Now:yyyy_MM_dd_HH_mm_ss}.txt");
             _rigLog = new System.IO.StreamWriter(path, append: false) { AutoFlush = true };
             RLog($"=== HandRigController started. debugForceTestPose={debugForceTestPose} ===");
@@ -256,6 +257,26 @@ namespace AuraXR
                         sb.Append($"  [{i}]{jnames[i]} bone={bname} parent={parent} targetDeg={targetDeg:F1} afterEuler={euler}\n");
                     }
                     RLog(sb.ToString());
+
+                    // ── BONE WORLD POSITIONS: model açısı vs eklem dünya konumu ───
+                    var wpos = new System.Text.StringBuilder();
+                    wpos.AppendLine($"[BONE_WORLD] hand={(isLeftHand?"L":"R")} frame={Time.frameCount}");
+                    wpos.AppendLine("  Joint      modelDeg    worldX    worldY    worldZ  localEulerX  localEulerY  localEulerZ");
+                    for (int i = 0; i < count; i++)
+                    {
+                        float modelDeg = Mathf.Clamp(
+                            pose.ManoJointAngles[i] * Mathf.Rad2Deg * debugAngleMultiplier,
+                            jointMinAngleDeg, jointMaxAngleDeg);
+                        if (fingerJoints[i] == null)
+                        {
+                            wpos.AppendLine($"  {jnames[i],-10} {modelDeg,9:F2} NULL");
+                            continue;
+                        }
+                        Vector3    wp = fingerJoints[i].position;
+                        Vector3    le = fingerJoints[i].localEulerAngles;
+                        wpos.AppendLine($"  {jnames[i],-10} {modelDeg,9:F2} {wp.x,9:F4} {wp.y,9:F4} {wp.z,9:F4} {le.x,12:F2} {le.y,12:F2} {le.z,12:F2}");
+                    }
+                    RLog(wpos.ToString());
                 }
 
                 // ── VERBOSE LOG (works on Quest device too) ──────────────────────

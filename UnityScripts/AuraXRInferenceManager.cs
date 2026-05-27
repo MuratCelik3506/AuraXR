@@ -54,6 +54,12 @@ namespace AuraXR
         [Tooltip("Root Transform of the right virtual hand — moved to match right controller each frame")]
         public Transform virtualHandRight;
 
+        [Header("Hand Mesh Pivot Offset")]
+        [Tooltip("Local-space offset applied to both hands when placing them at the controller anchor. " +
+                 "Use this to align the hand mesh visually with the controller tracking origin (white dot). " +
+                 "Tune in Inspector while in Play mode — start with (0,0,0) and adjust until the wrist lines up.")]
+        public Vector3 handPivotOffset = Vector3.zero;
+
         [Header("Inference Rate")]
         [Tooltip("Run inference every N frames to match ~30 FPS training rate at 72 Hz")]
         public int inferenceEveryNFrames = 2;
@@ -154,9 +160,9 @@ namespace AuraXR
         void Start()
         {
             // Open per-session debug log file (survives console truncation)
-            _debugLogPath = System.IO.Path.Combine(
-                Application.persistentDataPath,
-                $"auraxr_debug_{System.DateTime.Now:yyyy_MM_dd_HH_mm_ss}.txt");
+            string logFolder = System.IO.Path.Combine(Application.persistentDataPath, "Logs");
+            System.IO.Directory.CreateDirectory(logFolder);
+            _debugLogPath = System.IO.Path.Combine(logFolder, $"auraxr_debug_{System.DateTime.Now:yyyy_MM_dd_HH_mm_ss}.txt");
             _debugWriter = new System.IO.StreamWriter(_debugLogPath, append: false) { AutoFlush = true };
             DLog($"=== AuraXRInferenceManager debug log started ===");
             DLog($"persistentDataPath: {Application.persistentDataPath}");
@@ -189,11 +195,21 @@ namespace AuraXR
             Transform rightCtrl   = featureAssembler?.rightControllerTransform;
             Transform leftCtrl    = featureAssembler?.leftControllerTransform;
 
-            // Anchor virtual hands to controller positions every frame
+            // Anchor virtual hands to controller positions every frame (+ configurable pivot offset)
             if (virtualHandLeft  != null && leftCtrl  != null)
-                virtualHandLeft.SetPositionAndRotation(leftCtrl.position, leftCtrl.rotation);
+                virtualHandLeft.SetPositionAndRotation(
+                    leftCtrl.position  + leftCtrl.rotation  * handPivotOffset,
+                    leftCtrl.rotation);
             if (virtualHandRight != null && rightCtrl != null)
-                virtualHandRight.SetPositionAndRotation(rightCtrl.position, rightCtrl.rotation);
+                virtualHandRight.SetPositionAndRotation(
+                    rightCtrl.position + rightCtrl.rotation * handPivotOffset,
+                    rightCtrl.rotation);
+
+            // Log controller anchor vs wrist bone positions every 90 frames (~1.25 s)
+            if (Time.frameCount % 90 == 0)
+                LogWristOffset(rightCtrl, virtualHandRight, "R");
+            if (Time.frameCount % 90 == 5)
+                LogWristOffset(leftCtrl,  virtualHandLeft,  "L");
 
             _frameCounter++;
             if (_frameCounter % inferenceEveryNFrames != 0) return;
@@ -242,6 +258,40 @@ namespace AuraXR
             _workerRight?.Dispose();
             _workerLeft?.Dispose();
             _debugWriter?.Close();
+        }
+
+        /// Logs controller anchor pos, virtual hand root pos, and the first child wrist bone (if any).
+        /// The delta tells us exactly how much handPivotOffset needs to be to close the visual gap.
+        private void LogWristOffset(Transform ctrl, Transform handRoot, string side)
+        {
+            if (ctrl == null || handRoot == null) return;
+
+            Vector3 ctrlPos = ctrl.position;
+            Vector3 rootPos = handRoot.position;   // = ctrl pos + rotated offset (after our placement)
+
+            // Find the deepest wrist bone: first child of handRoot, or an OVRSkeleton bone[0]
+            Vector3 wristWorld = rootPos;
+            string  wristSrc   = "handRoot";
+            var ovrSkel = handRoot.GetComponentInChildren<OVRSkeleton>();
+            if (ovrSkel != null && ovrSkel.Bones != null && ovrSkel.Bones.Count > 0 && ovrSkel.Bones[0].Transform != null)
+            {
+                wristWorld = ovrSkel.Bones[0].Transform.position;
+                wristSrc   = $"OVRSkel.bones[0]({ovrSkel.Bones[0].Id})";
+            }
+            else if (handRoot.childCount > 0)
+            {
+                wristWorld = handRoot.GetChild(0).position;
+                wristSrc   = $"child[0]({handRoot.GetChild(0).name})";
+            }
+
+            // Delta: from ctrl to wrist bone, in ctrl's local frame (= the offset we'd need to apply)
+            Vector3 deltaWorld = wristWorld - ctrlPos;
+            Vector3 deltaLocal = Quaternion.Inverse(ctrl.rotation) * deltaWorld;
+
+            DLog($"[PIVOT|{side}] ctrl={ctrlPos:F4}  handRoot={rootPos:F4}  " +
+                 $"wrist({wristSrc})={wristWorld:F4}  " +
+                 $"delta_world={deltaWorld:F4}  delta_local={deltaLocal:F4}  dist={deltaWorld.magnitude * 100f:F1}cm  " +
+                 $"currentOffset={handPivotOffset:F4}");
         }
 
         private void DLog(string msg)
@@ -401,7 +451,7 @@ namespace AuraXR
             => new Vector3(v.x, v.y, -v.z);
 
         private static Quaternion ToHOT3DQuat(Quaternion q)
-            => new Quaternion(-q.x, -q.y, q.z, q.w);
+            => new Quaternion(q.x, q.y, -q.z, q.w);
 
         // -----------------------------------------------------------------------
         // Load model + parse meta JSON
