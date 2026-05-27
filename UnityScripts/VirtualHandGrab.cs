@@ -27,12 +27,35 @@ namespace AuraXR
         [Tooltip("Radius around wrist to search for objects (metres)")]
         public float grabRadius = 0.15f;
 
-        [Tooltip("Grip trigger threshold (0–1)")]
-        public float gripThreshold = 0.7f;
+        [Tooltip("Grip trigger threshold (0–1). Lower = easier to grab.")]
+        public float gripThreshold = 0.5f;
+
+        [Tooltip("Also accept index-finger trigger for grab (more natural for some users)")]
+        public bool acceptIndexTrigger = true;
 
         [Tooltip("Multiply wrist velocity when throwing")]
         [Range(0f, 5f)]
         public float throwMultiplier = 1.5f;
+
+        [Header("Proximity Auto-Close")]
+        [Tooltip("When enabled: hand automatically blends toward grab pose whenever a " +
+                 "graspable object is within grabRadius — no button press required. " +
+                 "The pose is driven by the model; this only drives the grab-blend flag " +
+                 "in HandRigController so the hand visually closes as it approaches.")]
+        public bool proximityAutoClose = true;
+
+        [Tooltip("Distance inside grabRadius at which grab-blend reaches 1 (fully closed). " +
+                 "Objects farther than grabRadius → blend 0. At this distance → blend 1.")]
+        public float proximityFullCloseRadius = 0.04f;
+
+        // Grab state — read by HandRigController to drive grab-pose blend
+        public bool  IsGrabbingLeft   { get; private set; }
+        public bool  IsGrabbingRight  { get; private set; }
+
+        // Smooth proximity blend (0 = open, 1 = fully closed).
+        // HandRigController uses this when proximityAutoClose is on.
+        public float ProximityBlendLeft  { get; private set; }
+        public float ProximityBlendRight { get; private set; }
 
         // Currently held objects
         private InteractableObject _heldLeft;
@@ -69,10 +92,11 @@ namespace AuraXR
 
         void Update()
         {
-            bool leftGrip  = OVRInput.Get(OVRInput.Axis1D.PrimaryHandTrigger,
-                                           OVRInput.Controller.LTouch) > gripThreshold;
-            bool rightGrip = OVRInput.Get(OVRInput.Axis1D.PrimaryHandTrigger,
-                                           OVRInput.Controller.RTouch) > gripThreshold;
+            // Grip trigger (middle-finger squeeze) OR index trigger — whichever the user prefers.
+            bool leftGrip  = OVRInput.Get(OVRInput.Axis1D.PrimaryHandTrigger,  OVRInput.Controller.LTouch) > gripThreshold
+                          || (acceptIndexTrigger && OVRInput.Get(OVRInput.Axis1D.PrimaryIndexTrigger, OVRInput.Controller.LTouch) > gripThreshold);
+            bool rightGrip = OVRInput.Get(OVRInput.Axis1D.PrimaryHandTrigger,  OVRInput.Controller.RTouch) > gripThreshold
+                          || (acceptIndexTrigger && OVRInput.Get(OVRInput.Axis1D.PrimaryIndexTrigger, OVRInput.Controller.RTouch) > gripThreshold);
 
             Transform leftProximity  = leftController  != null ? leftController  : leftHandWrist;
             Transform rightProximity = rightController != null ? rightController : rightHandWrist;
@@ -91,6 +115,35 @@ namespace AuraXR
 
             _leftGripWas  = leftGrip;
             _rightGripWas = rightGrip;
+
+            // ── Proximity auto-close blend ────────────────────────────────────
+            if (proximityAutoClose)
+            {
+                ProximityBlendLeft  = CalcProximityBlend(leftProximity);
+                ProximityBlendRight = CalcProximityBlend(rightProximity);
+            }
+            else
+            {
+                ProximityBlendLeft  = 0f;
+                ProximityBlendRight = 0f;
+            }
+        }
+
+        /// <summary>
+        /// Returns 0 when no object is within grabRadius, and smoothly rises to 1
+        /// as the nearest object approaches proximityFullCloseRadius.
+        /// </summary>
+        float CalcProximityBlend(Transform probe)
+        {
+            if (probe == null) return 0f;
+            var nearest = FindNearest(probe.position);
+            if (nearest == null) return 0f;
+
+            float dist  = Vector3.Distance(probe.position, nearest.transform.position);
+            // Remap: grabRadius → 0,  proximityFullCloseRadius → 1
+            float range = grabRadius - proximityFullCloseRadius;
+            if (range <= 0f) return 1f;
+            return Mathf.Clamp01(1f - (dist - proximityFullCloseRadius) / range);
         }
 
         void LateUpdate()
@@ -107,6 +160,7 @@ namespace AuraXR
         void HandleHand(Transform wrist, Transform proximity, ref InteractableObject held,
                         bool grip, bool gripWas, Vector3 wristPrev)
         {
+            bool isLeft       = wrist == leftHandWrist;
             bool justPressed  =  grip && !gripWas;
             bool justReleased = !grip &&  gripWas;
 
@@ -115,17 +169,31 @@ namespace AuraXR
                 var nearest = FindNearest(proximity.position);
                 if (nearest != null)
                 {
-                    if (wrist == leftHandWrist)
+                    if (isLeft)
                         Grab(nearest, wrist, ref held, ref _leftGrabPosOffset,  ref _leftGrabRotOffset);
                     else
                         Grab(nearest, wrist, ref held, ref _rightGrabPosOffset, ref _rightGrabRotOffset);
                     Debug.Log($"[VirtualHandGrab] Grabbed {nearest.gameObject.name}");
                 }
+                else
+                {
+                    // Trigger squeeze even with no object — hand still closes visually
+                    if (isLeft) IsGrabbingLeft  = true;
+                    else        IsGrabbingRight = true;
+                }
             }
-            else if (justReleased && held != null)
+            else if (justReleased)
             {
-                var throwVel = (wrist.position - wristPrev) / Time.deltaTime;
-                Release(ref held, throwVel);
+                if (held != null)
+                {
+                    var throwVel = (wrist.position - wristPrev) / Time.deltaTime;
+                    Release(ref held, throwVel, isLeft);
+                }
+                else
+                {
+                    if (isLeft) IsGrabbingLeft  = false;
+                    else        IsGrabbingRight = false;
+                }
             }
         }
 
@@ -156,14 +224,19 @@ namespace AuraXR
                 rb.linearVelocity  = Vector3.zero;
                 rb.angularVelocity = Vector3.zero;
             }
-            // Store grab-time offset so the object stays in the same relative position
             posOffset = wrist.InverseTransformPoint(obj.transform.position);
             rotOffset = Quaternion.Inverse(wrist.rotation) * obj.transform.rotation;
             held = obj;
+
+            if (wrist == leftHandWrist)  IsGrabbingLeft  = true;
+            else                         IsGrabbingRight = true;
         }
 
-        void Release(ref InteractableObject held, Vector3 wristVelocity)
+        void Release(ref InteractableObject held, Vector3 wristVelocity, bool isLeft)
         {
+            if (isLeft) IsGrabbingLeft  = false;
+            else        IsGrabbingRight = false;
+
             var rb = held.GetComponent<Rigidbody>();
             if (rb != null)
             {

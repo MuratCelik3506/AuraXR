@@ -1,6 +1,12 @@
 # Large data files — not tracked in git
 data/
 
+# External ONNX weight files (superseded by inline single-file exports)
+*.onnx.data
+
+# Editor
+.vscode/
+
 # Python
 .venv/
 __pycache__/

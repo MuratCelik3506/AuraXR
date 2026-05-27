@@ -1,36 +1,23 @@
-# HOT3D Exploration — Python Dependencies
+# AuraXR Pipeline — Python Dependencies
 # Install: pip install -r requirements.txt
+# HOT3D data is read directly from downloaded ZIP files — no additional SDK required.
 
 # --- Core scientific stack ---
 numpy>=1.24.0
-scipy>=1.11.0
 
 # --- PyTorch (CPU install; swap for GPU variant if available) ---
 torch>=2.1.0
 torchvision>=0.16.0
 
-# --- HOT3D / Aria data loading ---
-projectaria_tools>=1.5.1          # VRS file reader + camera models
-webdataset>=0.2.86                 # WebDataset streaming (HuggingFace clips format)
-datasets>=2.18.0                   # HuggingFace datasets API
+# --- ONNX export and verification ---
+onnx>=1.15.0
+onnxruntime>=1.17.0
 
-# --- MANO / hand model ---
-smplx>=0.1.28                      # MANO forward kinematics (requires MANO license)
-
-# --- Image processing ---
-opencv-python>=4.8.0
-Pillow>=10.0.0
-
-# --- 3D geometry (mesh, SDF queries) ---
-trimesh>=4.0.0
-open3d>=0.18.0                     # Optional: 3D visualisation
+# --- HDF5 dataset storage ---
+h5py>=3.9.0
 
 # --- Visualisation ---
 matplotlib>=3.7.0
-rerun-sdk==0.16.0                  # Official HOT3D visualiser
 
-# --- Utilities ---
-requests>=2.31.0
+# --- Progress bars ---
 tqdm>=4.66.0
-pandas>=2.0.0
-huggingface_hub>=0.21.0            # HF login + file download

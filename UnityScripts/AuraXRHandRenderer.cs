@@ -44,11 +44,26 @@ namespace AuraXR
         public float smoothing = 0.5f;
 
         // Last-frame angles for smoothing
-        private float[] _smoothed = new float[15];
-        private bool    _initialized;
+        private float[]          _smoothed = new float[15];
+        private bool             _initialized;
+        // If HandRigController is present on the same object, it takes ownership of bone writes.
+        private HandRigController _rigController;
+
+        void Awake()
+        {
+            // HandRigController and AuraXRHandRenderer both write to finger bones.
+            // If HandRigController is active on the same GameObject, defer to it to avoid
+            // each overwriting the other every LateUpdate.
+            _rigController = GetComponent<HandRigController>();
+            if (_rigController == null)
+                _rigController = GetComponentInParent<HandRigController>();
+        }
 
         void LateUpdate()
         {
+            // Yield to HandRigController when it is present and enabled
+            if (_rigController != null && _rigController.enabled) return;
+
             if (inferenceManager == null) return;
 
             HandPose pose = isLeftHand ? inferenceManager.LeftHand : inferenceManager.RightHand;

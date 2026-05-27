@@ -1,34 +1,6 @@
 # AuraXR Unity — Setup Guide
 
----
-
-## STATUS (2026-05-13)
-
-| Phase | Content | Status |
-|-------|---------|--------|
-| Phase 1: Project Setup | Unity project created, packages installed, folder structure | ✅ Done |
-| Phase 2: Scripts & Pipeline | All AuraXR scripts imported, GameManager configured | ✅ Done |
-| Phase 3: Controller Tracking | OVRInteractionComprehensive wired, OVRLeftHandVisual disabled | ✅ Done |
-| Phase 4: Hand Rigging | OVRCustomHandPrefab_L/R used, 15 OVR bones mapped, hands visible in scene | ✅ Done |
-| Phase 5: Object Scripts | InteractableObject + ProximityDetector on scene objects | ⚠️ InteractableObject missing from Bottle/Cup |
-| Phase 6: Scene Setup | Kitchen environment built, objects placed | ✅ Done |
-| Phase 6.2: Layer & Collision Matrix | Layers created, Player↔Environment ON, HandRig↔Environment OFF | ⚠️ Must verify in Inspector |
-| Phase 7: Hand Material | HandSkinMaterial created | ⚠️ Rendering Mode must be Fade; Emission checkbox must be ON on Bottle/Cup |
-| Phase 8: Data Logging | SessionDataLogger configured | ✅ Done |
-| Phase 8B: UX Scenarios | Kitchen task, haptics, grab, condition manager | ✅ Scripts fixed (see step3_unity.md) |
-| Phase 9: Deployment | Build deployed to Quest 3 | ✅ Done |
-| Wall/table penetration bug | ThumbstickLocomotion.ClampHeadPosition fixed | ✅ Fixed 2026-05-13 |
-
-**Remaining Inspector tasks:**
-- [ ] Add `InteractableObject` component to Bottle and Cup
-- [ ] Set hand material Rendering Mode → **Fade**
-- [ ] Enable **Emission checkbox** on Bottle and Cup materials
-- [ ] Set `ThumbstickLocomotion → Head Collision Layers` → `Environment`
-- [ ] Verify Layer Collision Matrix (Chapter 6.2)
-- [ ] Tick `autoStart` on `ScenarioKitchenTask`
-- [ ] Assign `GraspIndicator.leftHandRig` / `rightHandRig` on Bottle and Cup
-- [ ] Assign `AuraXRInferenceManager → Virtual Hand Left` → `LeftHandRig`
-- [ ] Assign `AuraXRInferenceManager → Virtual Hand Right` → `RightHandRig`
+> This guide contains all steps to set up the Unity project from scratch. The project is already configured; this document is kept as a reference and for troubleshooting.
 
 ---
 
@@ -41,16 +13,19 @@
 4.  Create custom layers (before any scene objects)
 5.  Set Layer Collision Matrix
 6.  Add OVRInteractionComprehensive prefab
-7.  Add CharacterController to OVRCameraRig       ← step2_unity.md Block D.4
-8.  Add ThumbstickLocomotion to OVRCameraRig       ← step2_unity.md Block A.3
+7.  Add CharacterController to OVRCameraRig
+8.  Add ThumbstickLocomotion to OVRCameraRig
 9.  Build scene environment (Floor, Walls, Table) — assign Environment layer immediately
 10. Add Bottle and Cup — assign Interactable layer immediately
 11. Add GameManager + all script components
-12. Create LeftHandRig and RightHandRig — assign HandRig layer
-13. Wire all Inspector cross-references
-14. Materials: hand = Fade, Bottle/Cup = Standard + Emission ON
+12. Add AuraXRAutoWire to GameManager — auto-wires all Inspector references
+13. Create LeftHandRig and RightHandRig — assign HandRig layer
+14. Materials: hand = Fade rendering, Bottle/Cup = Standard + Emission ON
 15. Build TaskCanvas (World Space)
 16. Press Play and verify Console
+
+NOTE: AuraXRAutoWire automatically wires all Inspector cross-references in Awake.
+      No manual Inspector assignments needed — the script self-destructs after running.
 ```
 
 ---
