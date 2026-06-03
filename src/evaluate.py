@@ -1,319 +1,164 @@
-"""
-Evaluation Suite — Intent-Aware XR Framework
-============================================
+"""evaluate.py — Step 4: evaluate trained model on val split and report metrics.
 
-This module provides specialized metrics for early action prediction in XR.
-Unlike standard classification, we focus on *how early* and *how reliably* 
-a model can predict an intent before the physical contact occurs.
+Run:
+    python evaluate.py --checkpoint ../checkpoints/right/ --data_dir ../data/right/ --output_dir ../results/
+    python evaluate.py --checkpoint ../checkpoints/left/  --data_dir ../data/left/  --output_dir ../results/
 
-Key Metrics Implemented:
------------------------
-1. Precision @ Observation Ratio (p_at_obs_ratio):
-   Measures accuracy at specific early stages of a motion (e.g., first 20%, 
-   25%, 30% of the trajectory). This validates the "Early Prediction" goal.
-
-2. Lead Time:
-   Calculates the average temporal distance (in frames) between the model's 
-   first confident prediction (confidence > threshold) and the actual 
-   frame of contact. High lead time = more time for proactive XR effects.
-
-3. Time-to-Contact (TTC):
-   An estimate (in seconds) of the remaining time before the hand reaches 
-   the object, derived from the clip's metadata and observation ratio.
-
-4. Prediction Stability (S):
-   Measures the switching rate of predictions over a sequence. 
-   Stability = 1 - (switches / (total_frames - 1)).
-
-5. Convergence Point (CP):
-   The temporal index (in seconds) from which the model's prediction 
-   remains consistently correct until the end of the window.
-
-6. Frame-wise Accuracy:
-   Percentage of total frames where the prediction matches Ground Truth.
-
-4. Ghosting Trigger Rate:
-   The percentage of samples where the model's confidence exceeds the 
-   threshold (usually 0.65), indicating how often the "Ghost Hand" 
-   effect would be visible to the user.
-
-Functions:
----------
-- compute_metrics: Standard precision, recall, F1, and accuracy.
-- precision_at_obs_ratio: Bucket-based precision analysis.
-- compute_ttc: Geometric estimation of remaining time.
-- evaluate_model: Full validation pass returning all the above.
+Metrics reported:
+    - Joint Angle MAE (degrees) — per joint + overall mean
+    - Per-phase MAE: pre_shape (10–40cm) vs grip (<10cm)
+    - Per-grip-category MAE: Power / Precision / Palmar / Pinch
 """
 
-from __future__ import annotations
+import argparse
+import json
+from pathlib import Path
 
-import torch
+import h5py
 import numpy as np
-from collections import defaultdict
+import torch
+from torch.utils.data import DataLoader
+
+from hot3d_dataset import HOT3DDataset
+from model import AuraXRModel
 
 
-# ─────────────────────────────────────────────────────────
-# Core precision / recall / F1
-# ─────────────────────────────────────────────────────────
+def parse_args():
+    p = argparse.ArgumentParser(description="Evaluate AuraXR model.")
+    p.add_argument("--checkpoint",  required=True, type=Path,
+                   help="Directory with best_model.pt and model_meta.json.")
+    p.add_argument("--data_dir",    required=True, type=Path)
+    p.add_argument("--output_dir",  default=Path("results"), type=Path)
+    p.add_argument("--batch_size",  default=256, type=int)
+    return p.parse_args()
 
-def compute_metrics(
-    preds:      torch.Tensor,   # (N,)  predicted class indices
-    labels:     torch.Tensor,   # (N,)  ground-truth class indices
-    num_classes: int,
-) -> dict[str, float]:
-    """
-    Compute macro-averaged Precision, Recall, F1 and overall Accuracy.
 
-    Precision_c = TP_c / (TP_c + FP_c)
-    Recall_c    = TP_c / (TP_c + FN_c)
-    F1_c        = 2 * P_c * R_c / (P_c + R_c)
+def denormalize(tensor: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
+    return tensor * std + mean
 
-    Returns a dict with keys:
-        precision, recall, f1, accuracy
-    """
-    preds  = preds.cpu().numpy()
-    labels = labels.cpu().numpy()
 
-    tp = np.zeros(num_classes, dtype=np.int64)
-    fp = np.zeros(num_classes, dtype=np.int64)
-    fn = np.zeros(num_classes, dtype=np.int64)
+def rad_to_deg(rad: np.ndarray) -> np.ndarray:
+    return np.abs(rad) * (180.0 / np.pi)
 
-    for c in range(num_classes):
-        tp[c] = np.sum((preds == c) & (labels == c))
-        fp[c] = np.sum((preds == c) & (labels != c))
-        fn[c] = np.sum((preds != c) & (labels == c))
 
-    with np.errstate(divide="ignore", invalid="ignore"):
-        prec = np.where(tp + fp > 0, tp / (tp + fp), 0.0)
-        rec  = np.where(tp + fn > 0, tp / (tp + fn), 0.0)
-        f1   = np.where(prec + rec > 0,
-                        2 * prec * rec / (prec + rec), 0.0)
+def main():
+    args = parse_args()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    return {
-        "precision": float(prec.mean()),
-        "recall":    float(rec.mean()),
-        "f1":        float(f1.mean()),
-        "accuracy":  float((preds == labels).mean()),
+    checkpoint_dir = args.checkpoint
+    meta_path = checkpoint_dir / "model_meta.json"
+    model_path = checkpoint_dir / "best_model.pt"
+
+    if not model_path.exists():
+        print(f"[ERROR] {model_path} not found. Run train.py first.")
+        return
+
+    with open(meta_path) as f:
+        meta = json.load(f)
+
+    arch = meta["architecture"]
+    model = AuraXRModel(
+        spatial_input_dim=arch["spatial_input_dim"],
+        object_input_dim=arch["object_input_dim"],
+        hidden_dim=arch["hidden_dim"],
+        embedding_dim=arch["embedding_dim"],
+        output_dim=arch["output_dim"],
+    ).to(device)
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.eval()
+
+    hdf5_path = args.data_dir / "dataset.h5"
+    val_ds = HOT3DDataset(hdf5_path, split="val", normalise=True)
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=2)
+
+    tgt_mean = np.array(meta["target_mean"], dtype=np.float32)
+    tgt_std  = np.array(meta["target_std"],  dtype=np.float32)
+
+    # Also load raw distances and labels for per-phase/category breakdown
+    with h5py.File(hdf5_path, "r") as hf:
+        raw_distances = hf["val"]["distances"][:]
+        raw_labels    = hf["val"]["labels"][:]
+        raw_features  = hf["val"]["features"][:]  # raw un-normalised
+
+    all_preds  = []
+    all_targets = []
+
+    with torch.no_grad():
+        for feat, tgt, dist in val_loader:
+            feat = feat.to(device)
+            spatial_in, object_in = AuraXRModel.split_feature(feat)
+            pred_norm = model(spatial_in, object_in).cpu().numpy()
+            tgt_norm  = tgt.numpy()
+            all_preds.append(pred_norm)
+            all_targets.append(tgt_norm)
+
+    all_preds   = np.concatenate(all_preds,   axis=0)
+    all_targets = np.concatenate(all_targets, axis=0)
+
+    # Denormalize
+    preds_raw   = denormalize(all_preds,   tgt_mean, tgt_std)
+    targets_raw = denormalize(all_targets, tgt_mean, tgt_std)
+
+    # Per-joint MAE (radians → degrees)
+    mae_per_joint = rad_to_deg(np.abs(preds_raw - targets_raw).mean(axis=0))
+    overall_mae   = mae_per_joint.mean()
+
+    # Per-phase MAE
+    grip_mask     = raw_distances < 0.10
+    preshape_mask = raw_distances >= 0.10
+
+    grip_mae     = rad_to_deg(np.abs(preds_raw[grip_mask]     - targets_raw[grip_mask]).mean())     if grip_mask.any()     else float("nan")
+    preshape_mae = rad_to_deg(np.abs(preds_raw[preshape_mask] - targets_raw[preshape_mask]).mean()) if preshape_mask.any() else float("nan")
+
+    # Per-grip-category MAE (using one-hot in raw features indices 3:7)
+    grip_names = ["Power", "Precision", "Palmar", "Pinch"]
+    feat_mean_arr = np.array(meta["feature_mean"], dtype=np.float32)
+    feat_std_arr  = np.array(meta["feature_std"],  dtype=np.float32)
+
+    # Denormalize features to recover the one-hot grip category
+    # New layout: [dir(3), dist(1), grip_oh(4), bbox(3)] → grip_oh at [4:8]
+    raw_feat_grip = raw_features[:, 4:8]  # already raw from disk
+    cat_maes = {}
+    for i, name in enumerate(grip_names):
+        mask = raw_feat_grip[:, i] == 1.0
+        if mask.any():
+            cat_maes[name] = float(rad_to_deg(np.abs(preds_raw[mask] - targets_raw[mask]).mean()))
+        else:
+            cat_maes[name] = float("nan")
+
+    # Print results
+    print("\n" + "=" * 60)
+    print("  AuraXR Evaluation Results")
+    print("=" * 60)
+    print(f"\n  Overall MAE: {overall_mae:.2f}°  (target < 5°)")
+    print(f"\n  Phase breakdown:")
+    print(f"    Pre-shape (10–40cm): {preshape_mae:.2f}°")
+    print(f"    Grip       (< 10cm): {grip_mae:.2f}°")
+    print(f"\n  Grip category breakdown:")
+    for name, mae in cat_maes.items():
+        print(f"    {name:<12}: {mae:.2f}°")
+    print(f"\n  Per-joint MAE (degrees):")
+    for i, mae in enumerate(mae_per_joint):
+        print(f"    Joint {i:2d}: {mae:.2f}°")
+
+    # Save to JSON
+    results = {
+        "overall_mae_deg":  float(overall_mae),
+        "preshape_mae_deg": float(preshape_mae),
+        "grip_mae_deg":     float(grip_mae),
+        "per_category_mae_deg": cat_maes,
+        "per_joint_mae_deg": mae_per_joint.tolist(),
+        "n_val_frames":     int(len(preds_raw)),
+        "n_grip_frames":    int(grip_mask.sum()),
+        "n_preshape_frames":int(preshape_mask.sum()),
     }
 
-
-# ─────────────────────────────────────────────────────────
-# Precision @ Observation Ratio
-# ─────────────────────────────────────────────────────────
-
-def precision_at_obs_ratio(
-    preds:       list[int],          # predicted class per sample
-    labels:      list[int],          # GT class per sample
-    obs_ratios:  list[float],        # obs_ratio per sample
-    ratio_bins:  list[float] | None = None,
-) -> dict[str, float]:
-    """
-    Group samples by obs_ratio bucket and compute precision per bucket.
-
-    Returns dict: { '≤0.20': precision, '≤0.25': ..., '≤0.30': ... }
-    """
-    if ratio_bins is None:
-        ratio_bins = [0.20, 0.25, 0.30]
-
-    results = {}
-    for threshold in ratio_bins:
-        mask = [r <= threshold + 1e-6 for r in obs_ratios]
-        if not any(mask):
-            results[f"≤{threshold:.2f}"] = 0.0
-            continue
-        tp = sum(
-            1 for p, l, m in zip(preds, labels, mask) if m and p == l
-        )
-        fp = sum(
-            1 for p, l, m in zip(preds, labels, mask) if m and p != l
-        )
-        results[f"≤{threshold:.2f}"] = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-
-    return results
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = args.output_dir / f"eval_{checkpoint_dir.name}.json"
+    with open(out_path, "w") as f:
+        json.dump(results, f, indent=2)
+    print(f"\n  Saved: {out_path}")
 
 
-# ─────────────────────────────────────────────────────────
-# Lead Time
-# ─────────────────────────────────────────────────────────
-
-def compute_lead_time(
-    end_act_frames:  list[int],     # frame index of action-end (contact) per sample
-    pred_frame:      list[int],     # frame at which prediction was first made
-) -> float:
-    """
-    Lead Time = mean(end_act_frames - pred_frame) in frames.
-    Only counts samples where pred_frame < end_act_frames.
-    """
-    lead_times = [
-        e - p for e, p in zip(end_act_frames, pred_frame) if e > p
-    ]
-    return float(np.mean(lead_times)) if lead_times else 0.0
-
-
-# ─────────────────────────────────────────────────────────
-# Time-to-Contact (TTC)
-# ─────────────────────────────────────────────────────────
-
-def compute_ttc(
-    start_act:    int,
-    end_act:      int,
-    obs_ratio:    float,
-) -> int:
-    """
-    Estimate the Frames-to-Contact (FTC) from the moment a window is sampled
-    until the expected contact frame.
-
-    obs_end  = start_act + int(action_len * obs_ratio)
-    FTC      = (end_act - obs_end)
-
-    Returns FTC in frames.
-    """
-    action_len = end_act - start_act + 1
-    obs_end    = start_act + max(1, int(action_len * obs_ratio))
-    ttc_frames = max(0, end_act - obs_end)
-    return int(ttc_frames)
-
-
-def compute_batch_ttc(
-    start_acts: list[int],
-    end_acts:   list[int],
-    obs_ratios: list[float],
-    fps:        int = 30,
-) -> list[float]:
-    """Vectorised version of compute_ttc."""
-    return [
-        compute_ttc(s, e, r, fps)
-        for s, e, r in zip(start_acts, end_acts, obs_ratios)
-    ]
-
-
-# ─────────────────────────────────────────────────────────
-# Advanced Metrics for Sliding Window
-# ─────────────────────────────────────────────────────────
-
-def compute_stability(preds: list[int] | np.ndarray) -> float:
-    """
-    Stability = 1.0 - (number of switches / max possible switches).
-    
-    A 'switch' occurs when preds[t] != preds[t-1].
-    Returns 1.0 if the prediction never changes, 0.0 if it changes every frame.
-    """
-    if len(preds) < 2:
-        return 1.0
-    
-    preds = np.asanyarray(preds)
-    switches = np.sum(preds[1:] != preds[:-1])
-    max_switches = len(preds) - 1
-    return float(1.0 - (switches / max_switches))
-
-
-def find_convergence_point(
-    preds:  list[int] | np.ndarray,
-    labels: list[int] | np.ndarray,
-) -> int:
-    """
-    Find the first frame index 't' such that for all i >= t, preds[i] == labels[i].
-    Returns the frame index relative to the start of the simulation window.
-    If it never converges to 100% correctness, returns the total number of frames.
-    """
-    preds  = np.asanyarray(preds)
-    labels = np.asanyarray(labels)
-    N      = len(preds)
-    
-    if N == 0:
-        return 0
-
-    # Check from the end backwards
-    convergence_frame = N
-    for i in range(N - 1, -1, -1):
-        if preds[i] == labels[i]:
-            convergence_frame = i
-        else:
-            # Broken the chain of correctness
-            break
-            
-    return int(convergence_frame)
-
-
-def compute_frame_wise_accuracy(
-    preds:  list[int] | np.ndarray,
-    labels: list[int] | np.ndarray,
-) -> float:
-    """Simple percentage of matching frames."""
-    preds  = np.asanyarray(preds)
-    labels = np.asanyarray(labels)
-    if len(preds) == 0:
-        return 0.0
-    return float(np.mean(preds == labels))
-
-
-def compute_mpjpe(pose_a: np.ndarray, pose_b: np.ndarray) -> float:
-    """
-    Mean Per-Joint Position Error (MPJPE).
-    pose_a, pose_b: (21, 3) or (N, 21, 3)
-    Returns the average Euclidean distance between joints.
-    """
-    dist = np.linalg.norm(pose_a - pose_b, axis=-1) # (21,) or (N, 21)
-    return float(np.mean(dist))
-
-
-# ─────────────────────────────────────────────────────────
-# Full evaluation loop
-# ─────────────────────────────────────────────────────────
-
-@torch.no_grad()
-def evaluate_model(
-    model,
-    loader,
-    device,
-    fps: int = 30,
-    confidence_threshold: float = 0.65,
-) -> dict:
-    """
-    Run a full evaluation pass and return a comprehensive metrics dict.
-
-    Returns:
-        accuracy, precision, recall, f1,
-        precision_at_020, precision_at_025, precision_at_030,
-        mean_ttc_seconds, mean_lead_time_frames,
-        ghosting_trigger_rate  (fraction of samples above confidence threshold)
-    """
-    model.eval()
-    all_preds, all_labels = [], []
-    all_obs, all_probs    = [], []
-
-    from src.data.h2o_dataset import NUM_CLASSES
-
-    for batch in loader:
-        hand   = batch["hand_flat"].to(device)
-        obj    = batch["obj_rt"].to(device)
-        obs    = batch["obs_ratio"].to(device)
-        labels = batch["label"].to(device)
-
-        logits, _ = model(hand, obj, obs)
-        probs  = logits.softmax(dim=-1)
-        preds  = logits.argmax(dim=-1)
-
-        all_preds.append(preds.cpu())
-        all_labels.append(labels.cpu())
-        all_obs.append(obs.cpu())
-        all_probs.append(probs.max(dim=-1).values.cpu())
-
-    preds_t  = torch.cat(all_preds).numpy().tolist()
-    labels_t = torch.cat(all_labels).numpy().tolist()
-    obs_t    = torch.cat(all_obs).numpy().tolist()
-    probs_t  = torch.cat(all_probs).numpy().tolist()
-
-    base = compute_metrics(
-        torch.tensor(preds_t), torch.tensor(labels_t), NUM_CLASSES
-    )
-    p_at_ratio = precision_at_obs_ratio(preds_t, labels_t, obs_t)
-
-    # Ghosting trigger rate: fraction where max_prob ≥ threshold
-    ghosting_rate = float(np.mean([p >= confidence_threshold for p in probs_t]))
-
-    result = {**base}
-    result.update(p_at_ratio)
-    result["ghosting_trigger_rate"] = ghosting_rate
-
-    return result
+if __name__ == "__main__":
+    main()

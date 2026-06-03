@@ -1,21 +1,42 @@
-# Data & model checkpoints (large files, not tracked in git)
-data
-checkpoints/
-checkpoints_test/
-checkpoints_test_concat/
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
 
 # Python
 __pycache__/
-**/__pycache__/
-*.py[cod]
+*.pyc
 *.pyo
-*.egg-info/
+*.pyd
 .venv/
 venv/
-*.env
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
 
 # Jupyter
 .ipynb_checkpoints/
 
-# macOS
-.DS_Store
+# VS Code
+.vscode/
+
+# Model artifacts — trained weights & exports
+outputs/checkpoints/
+outputs/onnx/
+outputs/results/
+*.pt
+*.pth
+*.onnx
+
+# HOT3D raw dataset — too large for git
+data/aria/
+data/quest3/
+data/object_assets/*.zip
+data/logs/
+
+# Misc large / temp
+*.zip
+*.tar.gz
+Sl

@@ -1,0 +1,23 @@
+# AuraXR Pipeline — Python Dependencies
+# Install: pip install -r requirements.txt
+# HOT3D data is read directly from downloaded ZIP files — no additional SDK required.
+
+# --- Core scientific stack ---
+numpy>=1.24.0
+
+# --- PyTorch (CPU install; swap for GPU variant if available) ---
+torch>=2.1.0
+torchvision>=0.16.0
+
+# --- ONNX export and verification ---
+onnx>=1.15.0
+onnxruntime>=1.17.0
+
+# --- HDF5 dataset storage ---
+h5py>=3.9.0
+
+# --- Visualisation ---
+matplotlib>=3.7.0
+
+# --- Progress bars ---
+tqdm>=4.66.0
