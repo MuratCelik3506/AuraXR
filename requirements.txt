@@ -1,28 +1,8 @@
-# Intent-Aware Proactive XR Framework — Python requirements
-# Pinned for reproducibility on Apple M2 Max (macOS Sonoma+)
-
-# ── Core ML ──────────────────────────────────────────────
-torch>=2.2.0          # MPS support; install the Apple-silicon wheel
+# AuraXR — Python dependencies
+# Apple Silicon (M1/M2/M3): replace onnxruntime with onnxruntime-silicon
+torch>=2.3.0
 numpy>=1.26.0
-
-# ── CoreML export ────────────────────────────────────────
-coremltools>=7.2      # CoreML 7 / iOS 17 target, mlprogram format
-
-# ── Training utilities ───────────────────────────────────
+h5py>=3.10.0
 tqdm>=4.66.0
-pandas>=2.1.0         # for metrics csv optional analysis
-
-# ── HOT3D dataset download & loading ─────────────────────
-huggingface_hub>=0.23.0    # hf_hub_download, snapshot_download
-webdataset>=0.2.86         # WebDataset tar-based loading (optional)
-
-# ── Optional – faster data loading ───────────────────────
-# psutil>=5.9.0
-
-# ── Install notes ─────────────────────────────────────────
-# For Apple Silicon PyTorch wheel:
-#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-# (The default pip wheel already includes MPS on macOS arm64)
-#
-# HOT3D download (requires Hugging Face account + dataset access):
-#   python scripts/download_hot3d.py --output_dir data/hot3d --split train --device Aria
+onnxruntime>=1.18.0
+matplotlib>=3.8.0

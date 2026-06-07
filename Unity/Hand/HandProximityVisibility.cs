@@ -1,5 +1,16 @@
 using UnityEngine;
 
+namespace AuraXR
+{
+
+/// <summary>
+/// Cross-fades virtual hands and physical controllers based on distance to interactable objects.
+/// When a controller is within showDistance of any InteractableObject, the virtual hand fades in
+/// and the controller visual fades out. Reverses when the hand moves away past hideDistance.
+///
+/// Attach to any persistent GameObject. Assign leftController / rightController to the OVR
+/// controller anchor transforms, and leftHandRig / rightHandRig to the virtual hand GameObjects.
+/// </summary>
 public class HandProximityVisibility : MonoBehaviour
 {
     [Header("References")]
@@ -105,3 +116,5 @@ public class HandProximityVisibility : MonoBehaviour
         }
     }
 }
+
+} // namespace AuraXR

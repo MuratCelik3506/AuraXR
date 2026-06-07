@@ -1,42 +1,33 @@
 # macOS
 .DS_Store
-.AppleDouble
-.LSOverride
+**/.DS_Store
 
 # Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+**/__pycache__/
+*.py[cod]
+*.egg-info/
 .venv/
 venv/
-*.egg-info/
-dist/
-build/
-.mypy_cache/
-.ruff_cache/
+env/
 
-# Jupyter
-.ipynb_checkpoints/
-
-# VS Code
-.vscode/
-
-# Model artifacts — trained weights & exports
-outputs/checkpoints/
-outputs/onnx/
-outputs/results/
-*.pt
-*.pth
-*.onnx
-
-# HOT3D raw dataset — too large for git
+# Dataset & large binary files
 data/aria/
 data/quest3/
-data/object_assets/*.zip
-data/logs/
+data/object_assets/
 
-# Misc large / temp
-*.zip
-*.tar.gz
-Sl
+# Model checkpoints & exports
+checkpoints/
+onnx/
+
+# Training outputs
+logs/
+results/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code
+.claude/settings.local.json

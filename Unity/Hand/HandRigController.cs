@@ -63,7 +63,7 @@ namespace AuraXR
         };
 
         [Header("Smoothing")]
-        [Tooltip("Per-frame smoothing applied to inference angles. 0 = raw, 0.8 = heavy smoothing. Keep low — AuraXRHandRenderer adds more smoothing if also active.")]
+        [Tooltip("Per-frame smoothing applied to inference angles. 0 = raw, 0.8 = heavy smoothing.")]
         [Range(0f, 0.95f)]
         public float smoothing = 0.0f;
 
@@ -83,6 +83,25 @@ namespace AuraXR
                  "OVR hand bones: long axis = local +X, dorsal = local +Y → flexion axis = local -Z = Vector3.back = (0,0,-1). " +
                  "If fingers twist instead of curl, try (0,0,1). If they spread, try (0,1,0).")]
         public Vector3 bendAxis = new Vector3(0f, 0f, -1f);   // Vector3.back
+
+        [Header("Abduction (Finger Spread)")]
+        [Tooltip("Local-space axis for abduction (spreading fingers apart). " +
+                 "OVR bones: long axis = +X, dorsal = +Y → spread axis = local +Y = Vector3.up.")]
+        public Vector3 abductionAxis = Vector3.up;
+
+        [Tooltip("Per-finger sign multiplier for abduction (+1 or -1). " +
+                 "Thumb and Pinky spread in opposite directions to Index/Middle/Ring.")]
+        public float[] abductionSignMultipliers = new float[5] { -1f, -1f, 1f, 1f, 1f };
+
+        [Tooltip("Scale applied to abduction angles (0 = disabled, 1 = full UME value).")]
+        [Range(0f, 2f)]
+        public float abductionScale = 1f;
+
+        [Header("Wrist Flexion")]
+        [Tooltip("Blend factor for pose.WristFlexionDeg. 0 = wrist is purely controller rotation. " +
+                 "1 = full estimated wrist pitch bend applied. Tune carefully — wrist bone drives all fingers.")]
+        [Range(0f, 1f)]
+        public float wristFlexBlend = 0.5f;
 
         [Header("Debug")]
         [Tooltip("Force all finger joints to 0.5 rad (~28°) regardless of inference. " +
@@ -239,6 +258,25 @@ namespace AuraXR
                     Vector3 axis = rest * bendAxis;
                     fingerJoints[i].localRotation = Quaternion.AngleAxis(deg, axis) * rest;
                     applied++;
+                }
+
+                // ── Abduction (finger spread) on MCP joints only ──────────────────
+                if (abductionScale > 0f && pose.UmeAbductionAngles != null)
+                {
+                    // MCP joint indices in MANO order: Thumb=0, Index=3, Middle=6, Ring=9, Pinky=12
+                    int[] mcpIdx = { 0, 3, 6, 9, 12 };
+                    for (int f = 0; f < 5; f++)
+                    {
+                        int ji = mcpIdx[f];
+                        if (ji >= fingerJoints.Length || fingerJoints[ji] == null) continue;
+                        float sign   = (abductionSignMultipliers != null && f < abductionSignMultipliers.Length)
+                                       ? abductionSignMultipliers[f] : 1f;
+                        float abdDeg = pose.UmeAbductionAngles[f] * sign * Mathf.Rad2Deg
+                                       * abductionScale * debugAngleMultiplier;
+                        // Add abduction on top of the flexion already applied
+                        Quaternion abdRot = Quaternion.AngleAxis(abdDeg, abductionAxis);
+                        fingerJoints[ji].localRotation = abdRot * fingerJoints[ji].localRotation;
+                    }
                 }
 
                 // ── FILE LOG: bone state after applying rotations ─────────────────
