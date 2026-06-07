@@ -12,11 +12,13 @@ from torch.utils.data import Dataset
 class HOT3DDataset(Dataset):
     """Loads train or val split from dataset.h5.
 
-    Feature vector (11 dims):
-        [0:3]  rel_pos  — object position in wrist frame (x, y, z)
-        [3:7]  grip_oh  — grip category one-hot (Power/Precision/Palmar/Pinch)
-        [7:10] bbox     — object bbox half-extents (x, y, z) in meters
-        [10]   distance — hand-object distance in meters
+    Feature vector (15 dims):
+        [0:3]  dir_world     — unit vector from wrist to object, HOT3D world frame
+        [3:6]  dir_obj_local — same vector rotated into object-local frame
+        [6]    distance      — hand-object distance in metres
+        [7]    approach_speed — dot(wrist_velocity, dir_world), positive = moving toward object
+        [8:12] grip_oh       — grip category one-hot (Power/Precision/Palmar/Pinch)
+        [12:15] bbox         — object bbox half-extents (x, y, z) in metres
 
     Target vector (22 dims):
         UmeTrack joint angles for one hand (left or right).

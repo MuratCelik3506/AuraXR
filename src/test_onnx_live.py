@@ -64,11 +64,15 @@ def load_hand(hand: str):
 
 def predict(sess, feat_mean, feat_std, tgt_mean, tgt_std,
             dist: float, grip: int, bbox: list) -> np.ndarray:
-    # Direction: straight ahead (−Z in wrist frame = object directly forward)
-    # HOT3D: wrist Z-forward is typical approach direction
-    dir_x, dir_y, dir_z = 0.0, 0.0, -1.0  # directly ahead
+    # World-frame direction: straight ahead (−Z in HOT3D = forward toward object)
+    dir_x, dir_y, dir_z = 0.0, 0.0, -1.0
 
-    feat = np.array([dir_x, dir_y, dir_z, dist,
+    # 15-dim [dir_world(3), dir_obj_local(3), dist(1), approach_speed(1), grip_oh(4), bbox(3)]
+    # Object rotation = identity for simulation → dir_obj_local == dir_world
+    feat = np.array([dir_x, dir_y, dir_z,        # dir_world
+                     dir_x, dir_y, dir_z,         # dir_obj_local (identity rotation)
+                     dist,                         # distance
+                     0.0,                          # approach_speed (static simulation)
                      1.0 if grip == 0 else 0.0,
                      1.0 if grip == 1 else 0.0,
                      1.0 if grip == 2 else 0.0,
@@ -76,8 +80,8 @@ def predict(sess, feat_mean, feat_std, tgt_mean, tgt_std,
                      bbox[0], bbox[1], bbox[2]], dtype=np.float32)
 
     norm = (feat - feat_mean) / (feat_std + 1e-8)
-    spatial = norm[:4].reshape(1, 4)
-    obj_in  = norm[4:].reshape(1, 7)
+    spatial = norm[:8].reshape(1, 8)
+    obj_in  = norm[8:].reshape(1, 7)
 
     raw_out = sess.run(["joint_angles"],
                        {"spatial_input": spatial, "object_input": obj_in})[0][0]  # (22,)

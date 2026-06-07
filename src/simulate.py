@@ -50,15 +50,29 @@ def parse_args():
 
 
 def build_feature(rel_pos: np.ndarray, bop_id: int, meta: dict) -> torch.Tensor:
-    """Build normalized 11-dim feature vector for a single frame."""
+    """Build normalized 15-dim feature vector for a single simulated frame.
+
+    Layout: dir_world(3) + dir_obj_local(3) + dist(1) + approach_speed(1) + grip_oh(4) + bbox(3)
+    Object rotation defaults to identity (dir_obj_local == dir_world).
+    Approach_speed = 0 (static simulation).
+    """
     grip_oh, bbox = object_features(bop_id)
+    direction = rel_pos / (np.linalg.norm(rel_pos) + 1e-8)
     dist = float(np.linalg.norm(rel_pos))
-    raw = np.concatenate([rel_pos, grip_oh, bbox, [dist]]).astype(np.float32)
+
+    raw = np.concatenate([
+        direction,   # 3 world-frame
+        direction,   # 3 object-local (identity rotation → same as world-frame)
+        [dist],      # 1
+        [0.0],       # 1 approach_speed (static simulation)
+        grip_oh,     # 4
+        bbox,        # 3
+    ]).astype(np.float32)
 
     feat_mean = np.array(meta["feature_mean"], dtype=np.float32)
     feat_std  = np.array(meta["feature_std"],  dtype=np.float32)
     normalized = (raw - feat_mean) / (feat_std + 1e-8)
-    return torch.from_numpy(normalized).unsqueeze(0)  # (1, 11)
+    return torch.from_numpy(normalized).unsqueeze(0)  # (1, 15)
 
 
 def denorm_angles(normalized: np.ndarray, meta: dict) -> np.ndarray:
@@ -86,7 +100,6 @@ def main():
         object_input_dim=arch["object_input_dim"],
         hidden_dim=arch["hidden_dim"],
         embedding_dim=arch["embedding_dim"],
-        output_dim=arch["output_dim"],
     )
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
@@ -108,11 +121,12 @@ def main():
 
     with torch.no_grad():
         for dist in distances:
-            # Object directly ahead along wrist Z axis
+            # Object directly ahead along wrist Z axis; identity wrist orientation
             rel_pos = np.array([0.0, 0.0, dist], dtype=np.float32)
-            feat = build_feature(rel_pos, bop_id, meta)
+            feat    = build_feature(rel_pos, bop_id, meta)
             spatial_in, object_in = AuraXRModel.split_feature(feat)
-            pred_norm = model(spatial_in, object_in).numpy()[0]  # (22,)
+            pred_joints, _ = model(spatial_in, object_in)
+            pred_norm = pred_joints.numpy()[0]  # (22,)
             pred_deg  = denorm_angles(pred_norm, meta)
             predicted_angles.append(pred_deg)
 

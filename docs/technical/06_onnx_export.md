@@ -1,10 +1,10 @@
 # 06 — ONNX Export & Unity Sentis Loading
 
-**Status:** DRAFT | **Last updated:** 2026-06-03
+**Last updated:** 2026-06-06
 
 **Source files:**
-- `hot3d_exploration/export_onnx.py`
-- `hot3d_exploration/evaluate_onnx.py`
+- `src/export_onnx.py`
+- `src/evaluate_onnx.py`
 - `onnx/model_meta_left.json`
 - `onnx/model_meta_right.json`
 
@@ -36,7 +36,7 @@ model.eval()
 
 **Step 2: Create dummy inputs**
 ```python
-spatial_dummy = torch.zeros(1, 4)   # batch=1
+spatial_dummy = torch.zeros(1, 8)   # batch=1, 8-dim spatial
 object_dummy  = torch.zeros(1, 7)
 ```
 
@@ -47,20 +47,28 @@ torch.onnx.export(
     (spatial_dummy, object_dummy),
     "auraxr_right.onnx",
     input_names=["spatial_input", "object_input"],
-    output_names=["joint_angles"],
-    dynamic_axes={...},   # batch dimension is dynamic
-    opset_version=14,     # Unity Sentis requires opset 14+
-    do_constant_folding=True,  # fuse constant ops for speed
+    output_names=["joint_angles", "wrist_rot_6d"],
+    dynamic_axes={...},   # batch dimension is dynamic on all inputs/outputs
+    opset_version=14,          # Unity Sentis requires opset 14+
+    do_constant_folding=True,  # pre-computes static subgraph nodes at export time; reduces runtime ops
 )
 ```
 
 **Step 4: Verify with ONNX Runtime**
 ```python
-sess = ort.InferenceSession("auraxr_right.onnx")
-onnx_out = sess.run(None, inputs)[0]
-pytorch_out = model(spatial_dummy, object_dummy).numpy()
-assert abs(onnx_out - pytorch_out).max() < 1e-5   # must match
+sess = ort.InferenceSession(str(onnx_path))
+inputs = {"spatial_input": spatial_dummy.numpy(), "object_input": object_dummy.numpy()}
+outputs = sess.run(None, inputs)        # outputs[0]=joint_angles, outputs[1]=wrist_rot_6d
+
+with torch.no_grad():
+    pt_joints, pt_rot = model(spatial_dummy, object_dummy)   # model returns a tuple
+
+max_diff_joints = abs(outputs[0] - pt_joints.numpy()).max()
+max_diff_rot    = abs(outputs[1] - pt_rot.numpy()).max()
+assert max_diff_joints < 1e-5   # must match
+assert max_diff_rot    < 1e-5
 ```
+The 1e-5 tolerance accounts for float32 rounding differences between PyTorch and ONNX Runtime's CPU backend. Note: `model()` returns a tuple `(joint_angles, wrist_rot_6d)` — never call `.numpy()` directly on the return value.
 
 **Step 5: Copy model_meta.json**
 `model_meta.json` is copied from the checkpoint directory to the `onnx/` directory. Unity reads this to denormalize model outputs.
@@ -73,8 +81,6 @@ assert abs(onnx_out - pytorch_out).max() < 1e-5   # must match
 |------|---------|
 | `onnx/auraxr_right.onnx` | Right hand model |
 | `onnx/auraxr_left.onnx` | Left hand model |
-| `onnx/auraxr_right_v6.onnx` | Right hand V6 variant |
-| `onnx/auraxr_left_v6.onnx` | Left hand V6 variant |
 | `onnx/model_meta_right.json` | Normalization stats for right model |
 | `onnx/model_meta_left.json` | Normalization stats for left model |
 
@@ -86,16 +92,18 @@ This JSON file is critical for Unity. It contains the normalization statistics n
 
 ```json
 {
-  "feature_mean":  [11 floats],   // mean for each input feature dimension
-  "feature_std":   [11 floats],   // std for each input feature dimension
-  "target_mean":   [22 floats],   // mean for each output joint angle
-  "target_std":    [22 floats],   // std for each output joint angle
+  "feature_mean":    [15 floats],   // mean for each input feature dimension
+  "feature_std":     [15 floats],   // std for each input feature dimension
+  "target_mean":     [22 floats],   // mean for each UME joint angle (radians)
+  "target_std":      [22 floats],   // std for each UME joint angle
+  "wrist_rot_mean":  [6 floats],    // mean for 6D wrist rotation output
+  "wrist_rot_std":   [6 floats],    // std for 6D wrist rotation output
   "architecture": {
-    "spatial_input_dim": 4,
+    "spatial_input_dim": 8,
     "object_input_dim":  7,
     "output_dim":        22,
-    "hidden_dim":        128,
-    "embedding_dim":     64
+    "hidden_dim":        256,
+    "embedding_dim":     128
   }
 }
 ```
@@ -135,13 +143,15 @@ _workerRight = new Worker(model, BackendType.GPUCompute);
 
 **Running inference (Update method):**
 ```csharp
-using var spatialTensor = new Tensor<float>(new TensorShape(1, 4), spatialInput);
+using var spatialTensor = new Tensor<float>(new TensorShape(1, 8), spatialInput);
 using var objectTensor  = new Tensor<float>(new TensorShape(1, 7), objectInput);
 worker.SetInput("spatial_input", spatialTensor);
 worker.SetInput("object_input",  objectTensor);
 worker.Schedule();
-var outTensor = worker.PeekOutput("joint_angles") as Tensor<float>;
-using var cpu = outTensor.ReadbackAndClone();   // copy GPU→CPU
+var jointTensor = worker.PeekOutput("joint_angles") as Tensor<float>;
+var wristTensor = worker.PeekOutput("wrist_rot_6d") as Tensor<float>;
+using var jointsCpu = jointTensor.ReadbackAndClone();
+using var wristCpu  = wristTensor.ReadbackAndClone();
 ```
 
 ---
@@ -150,12 +160,3 @@ using var cpu = outTensor.ReadbackAndClone();   // copy GPU→CPU
 
 Unity Sentis supports **ONNX opset 14+**. The export uses `opset_version=14`. If you use a newer PyTorch with opset 17+ ops, you may need to downgrade or adjust the export.
 
----
-
-## What to Inspect Together
-
-When reviewing this document with the professor, check:
-- [ ] Open `onnx/model_meta_right.json` — do the `target_mean` values look like real radian values (roughly 0.1–0.5 rad per finger joint)?
-- [ ] Does `BackendType.GPUCompute` work on Quest 3? Or should we use `BackendType.CPU` as fallback?
-- [ ] Is constant folding (`do_constant_folding=True`) safe? (It can cause issues with dynamic batch sizes — verify the ONNX verification step passes)
-- [ ] V6 ONNX models exist — are they using V1 or V2 architecture? Check if spatial_input shape is [1,4] or [1,8].

@@ -95,7 +95,7 @@ def evaluate_hand(hand: str, base_dir: Path) -> dict:
 
     # Load val split
     with h5py.File(data_path, "r") as hf:
-        raw_feat      = hf["val"]["features"][:]    # (N, 11) raw (un-normalised)
+        raw_feat      = hf["val"]["features"][:]    # (N, 15) raw (un-normalised)
         raw_targets   = hf["val"]["targets"][:]     # (N, 22)
         raw_distances = hf["val"]["distances"][:]   # (N,)
 
@@ -103,9 +103,9 @@ def evaluate_hand(hand: str, base_dir: Path) -> dict:
     print(f"\n[{hand.upper()}] Val frames: {N:,}")
 
     # Normalize features for model input
-    norm_feat = (raw_feat - feat_mean) / (feat_std + 1e-8)   # (N, 11)
-    spatial   = norm_feat[:, :4]   # dir(3) + dist(1)
-    obj_in    = norm_feat[:, 4:]   # grip_oh(4) + bbox(3)
+    norm_feat = (raw_feat - feat_mean) / (feat_std + 1e-8)   # (N, 15)
+    spatial   = norm_feat[:, :8]   # dir_world(3) + dir_obj_local(3) + dist(1) + approach_speed(1)
+    obj_in    = norm_feat[:, 8:]   # grip_oh(4) + bbox(3)
 
     # Normalize targets (ground truth in normalized space, then denorm after inference)
     norm_tgt = (raw_targets - tgt_mean) / (tgt_std + 1e-8)   # for reference only
@@ -148,7 +148,7 @@ def evaluate_hand(hand: str, base_dir: Path) -> dict:
     )) if preshape_mask.any() else float("nan")
 
     # ── Per-grip-category MAE ─────────────────────────────────────────────────
-    grip_oh = raw_feat[:, 4:8]   # one-hot: Power/Precision/Palmar/Pinch (raw, no normalisation)
+    grip_oh = raw_feat[:, 8:12]   # one-hot: Power/Precision/Palmar/Pinch
     cat_maes = {}
     for i, name in enumerate(GRIP_NAMES):
         mask = grip_oh[:, i] == 1.0

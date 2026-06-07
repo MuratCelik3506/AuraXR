@@ -1,11 +1,11 @@
 # 02 — HOT3D Dataset & Dataset Building
 
-**Status:** DRAFT | **Last updated:** 2026-06-03
+**Last updated:** 2026-06-06
 
 **Source files:**
-- `hot3d_exploration/build_dataset.py`
-- `hot3d_exploration/hot3d_utils.py`
-- `hot3d_exploration/grip_categories.py`
+- `src/build_dataset.py`
+- `src/hot3d_utils.py`
+- `src/grip_categories.py`
 
 ---
 
@@ -61,7 +61,7 @@ Joint angles are stored in **radians**. The model predicts normalized versions o
 
 ## Dataset Building: `build_dataset.py`
 
-This script converts raw HOT3D ZIPs into a training-ready HDF5 file.
+This script converts raw HOT3D ZIPs into a training-ready HDF5 file. HDF5 was chosen because it stores all splits, feature matrices, and normalization statistics in a single binary file with gzip compression, and `h5py` supports random-access reads — PyTorch DataLoader can fetch individual rows from disk without loading the entire dataset into RAM.
 
 ### Run command
 ```bash
@@ -75,7 +75,7 @@ python build_dataset.py --data_dir ../data/quest3/ --output_dir ../data/left/  -
 `hot3d_utils.find_sequences(data_dir, split="train")` returns a list of sequence directories in `data/quest3/train/`.
 
 **Step 2: Train/val split by sequence**
-Sequences are shuffled (seed=42) and split: 15% go to validation, 85% to train. Split is by whole sequence (not by frame) to prevent data leakage.
+Sequences are shuffled (seed=42, fixed for reproducibility) and split: 15% go to validation, 85% to train. The split is by whole sequence — not by frame — because consecutive frames within a sequence share the same scene, lighting, and object positions. Splitting by frame would leak near-identical frames into both sets, making validation metrics appear falsely optimistic.
 
 **Step 3: Extract frames from each sequence**
 For each sequence, `extract_frames()` reads two ZIP files:
@@ -87,46 +87,23 @@ For each timestamp that has both a hand pose and object poses:
 2. For each visible object, compute: `rel_pos = rotate_vec(wrist_frame_inverse, obj_pos - wrist_pos)`
 3. Keep only the **nearest** object
 4. Compute distance = `|rel_pos|`
-5. Skip if distance > 40cm (`MAX_DISTANCE`)
-6. Label: `"grip"` if distance < 10cm, else `"pre_shape"`
-7. Build 11-dim feature vector (see [03_feature_engineering.md](03_feature_engineering.md))
+5. Skip if distance > 40cm (`MAX_DISTANCE`) or `hand_confidence < 0.70`. The 40cm cutoff matches the maximum distance at which the hand visibly adapts its shape — beyond arm reach, the hand stays in neutral and adds no useful signal. The 0.70 confidence threshold filters frames where UmeTrack was interpolating rather than directly tracking; below this level the joint angles are unreliable.
+6. Label: `"grip"` if distance < 10cm, else `"pre_shape"`. At ~10cm the fingertips start making contact with the object surface; this boundary separates the contact phase from the pre-shaping phase.
+7. Build 15-dim feature vector (see [03_feature_engineering.md](03_feature_engineering.md))
 
-**Step 4: Approach augmentation**
-For every grip frame (distance < 15cm), generate 6 synthetic samples at larger distances (0.30m, 0.50m, 0.70m, 1.00m, 1.50m, 2.50m). The target pose is a smoothstep blend between the grip pose and a fully open hand (all zeros). These are labeled `"approach"`.
-
-This teaches the model that far away → open hand, close → closed hand, creating smooth anticipatory pre-shaping.
-
-**Step 5: Normalize**
+**Step 4: Normalize**
 Compute per-feature mean and std over the **training set only**. Store in `dataset.h5` metadata as a JSON string. Validation set is normalized with training statistics (no leakage).
 
-**Step 6: Write HDF5**
+**Step 5: Write HDF5**
 ```
 dataset.h5
-  /train/features   (N_train, 11)  float32, gzip compressed
+  /train/features   (N_train, 15)  float32, gzip compressed
   /train/targets    (N_train, 22)  float32, gzip compressed
-  /train/labels     (N_train,)     string   "grip"/"pre_shape"/"approach"
+  /train/wrist_rot_6d (N_train, 6) float32, gzip compressed
+  /train/labels     (N_train,)     string   "grip" | "pre_shape"
   /train/distances  (N_train,)     float32
   /val/...          same structure
   attrs["meta"]     JSON with norm stats + architecture config
 ```
 
----
-
-## Output Datasets
-
-| File | Hand | Notes |
-|------|------|-------|
-| `data/left/dataset.h5` | Left | V1 features (11 dims) |
-| `data/right/dataset.h5` | Right | V1 features (11 dims) |
-| `data/left_v5/dataset.h5` | Left | V5 variant |
-| `data/right_v5/dataset.h5` | Right | V5 variant |
-
----
-
-## What to Inspect Together
-
-When reviewing this document with the professor, check:
-- [ ] Is the UmeTrack joint order correct? (Can cross-check with HOT3D paper)
-- [ ] Does the 40cm distance cutoff make sense? (Objects further than arm reach are excluded)
-- [ ] Is the approach augmentation strategy sound? Does smoothstep blending match real human behavior?
-- [ ] What is the actual frame count for left/right after filtering? (Run `python build_dataset.py` and note output)
+**Class balance:** Grip frames (distance < 10cm) make up only ~5–8% of the raw dataset — most of the recording time captures the hand approaching or moving away from objects. Without correction, the model trains almost entirely on pre-shape data and never learns contact-phase finger curling. Grip frames are therefore repeated 10× in the training split. The 10× multiplier brings grip frames to roughly equal representation with pre-shape frames. Normalization statistics are computed *before* oversampling because oversampled copies are not new data — including them would bias the mean/std toward the oversampled class. Validation set is never oversampled.

@@ -1,10 +1,8 @@
 # 04 — Model Architecture
 
-**Status:** DRAFT | **Last updated:** 2026-06-03
+**Last updated:** 2026-06-06
 
-**Source files:**
-- `hot3d_exploration/model.py` (V1)
-- `hot3d_exploration/model_v2.py` (V2)
+**Source file:** `src/model.py`
 
 ---
 
@@ -17,123 +15,91 @@ The model must be:
 
 ---
 
-## V1 Architecture (`model.py`, ~54,000 params)
+## Architecture (`src/model.py`, ~1.37M params)
 
 ```
-spatial_input (B, 4)          object_input (B, 7)
-[dir_x, dir_y, dir_z, dist]   [grip_oh(4), bbox(3)]
-        │                              │
-  FC(4→128) + ReLU             FC(7→128) + ReLU
-  FC(128→64) + ReLU            FC(128→64) + ReLU
-        │                              │
-        └──────── cat(128) ────────────┘
-                     │
-               FC(128→128) + ReLU + Dropout(0.2)
-               FC(128→128) + ReLU + Dropout(0.2)
-               FC(128→22)  + Tanh
-                     │
-             joint_angles (B, 22)  ← normalized [-1, 1]
+spatial_input (B, 8)                        object_input (B, 7)
+[dir_world(3), dir_obj_local(3),            [grip_oh(4), bbox(3)]
+ dist(1), approach_speed(1)]
+        │                                          │
+  FC(8→512) + LayerNorm + ReLU             FC(7→256) + LayerNorm + ReLU
+  Dropout(0.125)                           FC(256→256) + ReLU
+  FC(512→256) + ReLU                               │
+        │                                          │
+        └──────────────── cat(512) ────────────────┘
+                               │
+                         FC(512→512) + ReLU + Dropout(0.25)
+                         FC(512→512) + ReLU + Dropout(0.125)
+                         FC(512→512) + ReLU + Dropout(0.0625)   ← 3rd layer (added)
+                               │
+        ┌──────────────────────┼──────────────────────────┐
+        │                      │                          │
+  ┌─────┴─────┐        ┌───────┴──────────┐      ┌───────┴────────┐
+  │ 5 × Finger│        │ Wrist Rotation   │      │ Grip Classifier│
+  │   Heads   │        │     Head         │      │ (train only,   │
+  │ (thumb…   │        │  FC(512→64)      │      │  not in ONNX)  │
+  │  pinky)   │        │  ReLU Dropout    │      │  FC(512→32)    │
+  │ FC(512→128)│       │  FC(64→6)        │      │  ReLU          │
+  │  ReLU     │        │        │         │      │  FC(32→4)      │
+  │ Dropout   │        │  wrist_rot_6d    │      └────────────────┘
+  │ FC(128→4) │        │    (B, 6)        │
+  └─────┬─────┘        └──────────────────┘
+        │  ↑ finger_hidden: 64→128 (added)
+     cat(20) + zeros(2)
+        │
+  joint_angles (B, 22)
 ```
 
 **Key design decisions:**
-- Two separate encoders prevent the object type from "leaking" into spatial processing
-- Tanh output bounds predictions to [-1, 1] (easy to denormalize)
-- Joints 20–21 are trained to 0 (they are always 0 in HOT3D, excluded from loss)
 
----
+- **Two separate encoders** prevent object type from "leaking" into spatial processing — if merged early, the model could exploit grip-category shortcuts instead of learning geometry
+  > *In plain language: if you mix "where is the object" and "what is the object" too early, the model might learn lazy shortcuts like "whenever it's a mug, close fingers" instead of learning the actual geometry of the approach. Keeping them separate forces each branch to do its own job first.*
 
-## V2 Architecture (`model_v2.py`, ~210,000 params)
+- **Per-finger heads** allow finger-specific weight allocation in the loss; each finger has independent learned parameters so thumb curling is not constrained by pinky curling. `finger_hidden=128` (raised from 64) gives each head enough capacity to learn the full flexion range.
+  > *In plain language: thumb and pinky move very differently. If one shared output layer predicted all fingers together, getting the thumb right might come at the cost of the pinky. Five separate heads let each finger be trained and weighted independently — and each head is now large enough to represent the full range of motion.*
 
-```
-spatial_input (B, 8)                    object_input (B, 7)
-[dir(3), dist(1), wrist_quat(4)]        [grip_oh(4), bbox(3)]
-        │                                       │
-  FC(8→256) + LayerNorm + ReLU           FC(7→128) + ReLU
-  Dropout(0.15)                          FC(128→128) + ReLU
-  FC(256→128) + ReLU                             │
-        │                                       │
-        └──────────── cat(256) ─────────────────┘
-                          │
-                    FC(256→256) + ReLU + Dropout(0.3)
-                    FC(256→256) + ReLU + Dropout(0.15)
-                          │
-              ┌───────────┼───────────┐
-              │           │           │  (5 finger heads)
-         Thumb Head   Index Head   ... Pinky Head
-         FC(256→64)   FC(256→64)      FC(256→64)
-         ReLU         ReLU             ReLU
-         FC(64→4)     FC(64→4)         FC(64→4)
-         Tanh         Tanh             Tanh
-              │           │           │
-              └───────────┴───────────┘
-                     cat(20)
-                   + zeros(2)           ← joints 20–21 always 0
-                          │
-                  joint_angles (B, 22)
-```
+- **`wrist_rotation_head`** predicts palm orientation as 6D rotation relative to approach direction — decoded in Unity via Gram-Schmidt orthogonalization
+  > *In plain language: the model also predicts which way the palm should be facing — not just which way the fingers curl. "6D rotation" is just a math-friendly way to represent orientation that doesn't have the discontinuity problems of angles.*
 
-**Improvements over V1:**
+- **Linear (no Tanh/Sigmoid) output** — Tanh saturates gradients near ±1, which would make it hard to learn the full [0, 2.0 rad] flexion range; the compound loss range penalty enforces plausible values without bounding the activations
+  > *In plain language: Tanh squashes everything between -1 and +1, which makes it hard for the model to predict large finger bend angles (a fully closed fist is ~2 radians). Instead, the output is unconstrained and a separate penalty during training discourages anatomically impossible angles.*
 
-| Feature | V1 | V2 |
-|---------|----|----|
-| Spatial input dims | 4 | 8 (+wrist quaternion) |
-| Hidden size | 128 | 256 |
-| Embedding size | 64 | 128 |
-| Output head | Single 22-dim | 5 per-finger × 4-dim |
-| Normalization | None | LayerNorm after spatial encoder |
-| Parameters | ~54k | ~210k |
-| Dropout | 0.2 | 0.3 (trunk), 0.15 (spatial) |
-
-**Why wrist quaternion (V2)?**
-The hand orientation (pronated vs. supinated, tilted) strongly determines grip shape. If you reach for a mug from above (palm down) vs. from the side (palm inward), the finger curl pattern is different. V1 could not distinguish these because it only had direction + distance. V2 adds the full wrist quaternion.
-
-**Why per-finger heads (V2)?**
-A single 22-dim output head forces all fingers to share the same gradient signal. In reality, each finger has semi-independent behavior. Per-finger heads let each finger specialize, and they can be individually analyzed in evaluation (e.g., "thumb error is higher than index finger error").
-
-**Why LayerNorm (V2)?**
-The wrist quaternion (range ≈ [-1, 1]) and direction (range ≈ [-1, 1]) have similar scale, but distance (range ≈ [0, 0.4]) is much smaller. LayerNorm normalizes the hidden representation after the spatial encoder, stabilizing training.
-
----
-
-## Currently Deployed Architecture
-
-The ONNX models in `onnx/` (`auraxr_left.onnx`, `auraxr_right.onnx`, and the v6 variants) all use the **V1 architecture** with `spatial_input_dim=4`. This is confirmed by the `architecture` field in `onnx/model_meta_*.json`:
-```json
-{"spatial_input_dim": 4, "object_input_dim": 7, "output_dim": 22, "hidden_dim": 128, "embedding_dim": 64}
-```
-V2 (`model_v2.py`) has been trained but not yet exported and deployed.
+- **Auxiliary `grip_classifier` head** is active only during training and not exported to ONNX — its sole purpose is to regularize the trunk representation so it stays grip-category-aware. Unity has no use for a grip-category prediction at runtime.
+  > *In plain language: during training, the shared middle part of the network is also asked "what grip type is this?" as a side task — not because we need that answer, but because it stops the network from forgetting about grip type when distance dominates the signal. This side task is discarded before shipping to Unity.*
 
 ---
 
 ## ONNX Input/Output Spec
 
-Both V1 and V2 export the same ONNX interface:
-
 ```
-Input  "spatial_input":  shape [batch, 4]   (V1) or [batch, 8]  (V2)  — normalized
-Input  "object_input":   shape [batch, 7]   — normalized
-Output "joint_angles":   shape [batch, 22]  — normalized, Tanh range [-1, 1]
+Input  "spatial_input":  shape [batch,  8] — [dir_world(3), dir_obj_local(3), dist(1), approach_speed(1)], normalized
+Input  "object_input":   shape [batch,  7] — [grip_oh(4), bbox(3)], normalized
+Output "joint_angles":   shape [batch, 22] — normalized; denorm with target_mean/std from model_meta.json
+Output "wrist_rot_6d":   shape [batch,  6] — normalized; denorm with wrist_rot_mean/std; then Gram-Schmidt → Quaternion
 ```
 
-The batch dimension is dynamic (dynamic_axes). In Unity, batch=1 (one hand per inference call).
+Batch dimension is dynamic. In Unity, batch=1 (one hand per inference call).
 
 ---
 
 ## Active Joints
 
-Both models define:
 ```python
 ACTIVE_JOINTS = list(range(20))  # indices 0–19
 ```
 
-Joints 20–21 are excluded from the loss during training. They are set to 0 in the V2 model via a registered zero buffer. In V1 they are predicted but not used (they converge to ~0 naturally since the target is always 0).
+Joints 20–21 are placeholder slots in the UmeTrack skeleton that HOT3D always records as 0.0 — they do not correspond to any physical joint. They are excluded from the loss during training and set to 0 via a registered zero buffer in the model, so the ONNX output always has exactly 22 values (matching the fixed-size Unity array) without requiring special-case handling in C#.
 
 ---
 
-## What to Inspect Together
+## split_feature
 
-When reviewing this document with the professor, check:
-- [ ] Is the V2 architecture diagram correct? Verify against `model_v2.py` lines 57–97.
-- [ ] Does the parameter count (~210k) fit Quest 3 memory budget?
-- [ ] Are V5 and V6 checkpoint variants just hyperparameter sweeps of V1, or of V2? (Check `checkpoints/` directory names)
-- [ ] Should we add an ablation table comparing V1 / V2 / V5 / V6 MAE scores here?
+```python
+@staticmethod
+def split_feature(feature: torch.Tensor):
+    """Split (B, 15) feature vector into spatial (B, 8) and object (B, 7)."""
+    return feature[:, :8], feature[:, 8:]
+```
+
+Used in `train.py`, `evaluate.py`, and `simulate.py`.
+
