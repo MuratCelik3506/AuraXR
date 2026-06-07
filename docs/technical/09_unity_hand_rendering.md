@@ -1,6 +1,6 @@
 # 09 — Unity Hand Rendering
 
-**Status:** DRAFT | **Last updated:** 2026-06-03
+**Status:** DRAFT | **Last updated:** 2026-06-05
 
 **Source files:**
 - `HandRigController.cs`
@@ -92,22 +92,21 @@ These approximate a natural power grip (fist around a cylinder).
 
 ---
 
-## Hand Pivot Offset (16.85cm X, 3.51cm Z)
+## Hand Pivot Offset & Wrist Alignment
 
-The hand mesh's wrist bone does not align with the Quest 3 controller tracking origin. The offset was measured by logging the delta between controller position and wrist bone position at runtime:
+`HandSkeletonAnchor` (execution order 1000) anchors `OVRSkeleton.bones[0]` to
+`virtualHandLeft.position` every frame, regardless of what OVRSkeleton says. This means the
+virtual wrist bone tracks exactly:
 
-```csharp
-// In AuraXRInferenceManager.cs, LogWristOffset():
-deltaLocal = Quaternion.Inverse(ctrl.rotation) * (wristBoneWorld - ctrlPos);
-// Measured: deltaLocal ≈ (0.1685, 0, 0.0351) in controller-local space
+```
+bones[0].worldPosition = ctrl.position + ctrl.rotation * handPivotOffset
 ```
 
-Applied every frame:
-```csharp
-virtualHandLeft.SetPositionAndRotation(
-    leftCtrl.position + leftCtrl.rotation * new Vector3(0.1685f, 0f, 0.0351f),
-    leftCtrl.rotation);
-```
+**To align wrist bone = controller anchor exactly:** set `handPivotOffset = (0, 0, 0)`.
+
+**Current default `(0.1685, 0, 0.0351)`** shifts the wrist relative to the Quest 3 tracking
+origin to match how the user physically holds the controller. Tune in Play mode by watching the
+gap between the visible hand mesh wrist and the controller's tracking dot.
 
 ---
 
@@ -133,5 +132,5 @@ When reviewing this document with the professor, check:
 - [ ] Are all 15 `fingerJoints` wired in the Inspector? (A common bug: some finger joints are None → that finger doesn't move)
 - [ ] What is the finger bone rotation axis? (Open `HandRigController.cs` past line 80 to see how `localRotation` is applied)
 - [ ] Does the grab blend feel natural? (Try grabbing a mug — does the hand visually close around it?)
-- [ ] Is (16.85cm X, 3.51cm Z) the right offset for both left and right hands, or does it differ?
+- [ ] Is (16.85cm X, 3.51cm Z) the right offset for both hands, or does it differ? Try setting it to (0,0,0) and adjusting up from there.
 - [ ] Test `debugBypassModel=true` in `AuraXRInferenceManager` — all joints at 0.5 rad — do all 15 finger bones visibly curl?

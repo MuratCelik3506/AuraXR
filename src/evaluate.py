@@ -1,8 +1,8 @@
 """evaluate.py — Step 4: evaluate trained model on val split and report metrics.
 
 Run:
-    python evaluate.py --checkpoint ../checkpoints/right/ --data_dir ../data/right/ --output_dir ../results/
-    python evaluate.py --checkpoint ../checkpoints/left/  --data_dir ../data/left/  --output_dir ../results/
+    python evaluate.py --checkpoint ../checkpoints/right/ --data_dir ../data/right/
+    python evaluate.py --checkpoint ../checkpoints/left/  --data_dir ../data/left/
 
 Metrics reported:
     - Joint Angle MAE (degrees) — per joint + overall mean
@@ -43,7 +43,12 @@ def rad_to_deg(rad: np.ndarray) -> np.ndarray:
 
 def main():
     args = parse_args()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
 
     checkpoint_dir = args.checkpoint
     meta_path = checkpoint_dir / "model_meta.json"
@@ -62,9 +67,11 @@ def main():
         object_input_dim=arch["object_input_dim"],
         hidden_dim=arch["hidden_dim"],
         embedding_dim=arch["embedding_dim"],
-        output_dim=arch["output_dim"],
     ).to(device)
-    model.load_state_dict(torch.load(model_path, map_location=device))
+    state = torch.load(model_path, map_location=device, weights_only=True)
+    if any(k.startswith("_orig_mod.") for k in state):
+        state = {k[len("_orig_mod."):]: v for k, v in state.items()}
+    model.load_state_dict(state)
     model.eval()
 
     hdf5_path = args.data_dir / "dataset.h5"
@@ -87,7 +94,8 @@ def main():
         for feat, tgt, dist in val_loader:
             feat = feat.to(device)
             spatial_in, object_in = AuraXRModel.split_feature(feat)
-            pred_norm = model(spatial_in, object_in).cpu().numpy()
+            pred_joints, _ = model(spatial_in, object_in)
+            pred_norm = pred_joints.cpu().numpy()
             tgt_norm  = tgt.numpy()
             all_preds.append(pred_norm)
             all_targets.append(tgt_norm)
@@ -115,9 +123,8 @@ def main():
     feat_mean_arr = np.array(meta["feature_mean"], dtype=np.float32)
     feat_std_arr  = np.array(meta["feature_std"],  dtype=np.float32)
 
-    # Denormalize features to recover the one-hot grip category
-    # New layout: [dir(3), dist(1), grip_oh(4), bbox(3)] → grip_oh at [4:8]
-    raw_feat_grip = raw_features[:, 4:8]  # already raw from disk
+    # layout: [dir_world(3), dir_obj_local(3), dist(1), approach_speed(1), grip_oh(4), bbox(3)] → grip_oh at [8:12]
+    raw_feat_grip = raw_features[:, 8:12]  # already raw from disk
     cat_maes = {}
     for i, name in enumerate(grip_names):
         mask = raw_feat_grip[:, i] == 1.0

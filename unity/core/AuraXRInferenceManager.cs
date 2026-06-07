@@ -6,25 +6,24 @@ using Unity.InferenceEngine;
 namespace AuraXR
 {
     /// <summary>
-    /// Runs AuraXRModel (11-dim MLP) inference each frame via Unity Sentis.
+    /// Runs AuraXRModel (15-dim MLP) inference each frame via Unity Sentis.
     ///
     /// Model: two branches → 22 UME joint angles per hand.
-    ///   Input  "spatial_input": [dir_x, dir_y, dir_z, distance]  — direction in wrist frame
+    ///   Input  "spatial_input": [dir_world(3), dir_obj_local(3), dist(1), approach_speed(1)]
     ///   Input  "object_input":  [grip_oh(4), bbox(3)]
-    ///   Output "joint_angles":  [22 joint angles, normalized]    — denorm with model_meta.json
+    ///   Output "joint_angles":  [22 joint angles, normalized]  — denorm with model_meta.json
     ///
-    /// Feature layout (11 dims):
-    ///   [0..2]  direction  — unit vector from wrist to object, in wrist local frame (HOT3D frame)
-    ///   [3]     distance   — metres, wrist to object centroid
-    ///   [4..7]  grip_onehot — Power / Precision / Palmar / Pinch  (HOT3D BOP categories)
-    ///   [8..10] bbox       — object half-extents x,y,z in metres
-    ///
-    /// UME→MANO mapping (22 UME flexion+abduction → 15 MANO flexion only):
-    ///   UME per finger: [abduction, MCP, PIP, DIP] × 5 fingers + 2 placeholders
-    ///   MANO keeps only flexion: Thumb[0,2,3], Index[5,6,7], Mid[9,10,11], Ring[13,14,15], Pinky[17,18,19]
+    /// Feature layout (15 dims):
+    ///   [0..2]  dir_world     — unit vector wrist→obj in HOT3D world frame (NOT wrist-local)
+    ///   [3..5]  dir_obj_local — same vector rotated into object-local frame
+    ///   [6]     distance      — metres, wrist to object centroid
+    ///   [7]     approach_speed — dot(wrist_velocity, dir_world); positive = moving toward object
+    ///   [8..11] grip_onehot   — Power / Precision / Palmar / Pinch  (HOT3D BOP categories)
+    ///   [12..14] bbox         — object half-extents x,y,z in metres
     ///
     /// Coordinate frame: HOT3D is right-handed Y-up. Unity is left-handed Y-up.
-    ///   Conversion: negate Z of positions and quaternion Z component.
+    ///   Position:   pos_hot3d  = (x, y, -z)
+    ///   Quaternion: quat_hot3d = (qx, qy, -qz, qw)
     ///
     /// Public output read by HandRigController / AuraXRHandRenderer each frame:
     ///   LeftHand.ManoJointAngles[15]  — radians, MANO order
@@ -82,9 +81,13 @@ namespace AuraXR
         // -----------------------------------------------------------------------
         private Worker _workerRight, _workerLeft;
 
-        // Normalization stats (11 feature dims, 22 target dims)
+        // Normalization stats (15 feature dims, 22 target dims)
         private float[] _featMeanRight, _featStdRight, _tgtMeanRight, _tgtStdRight;
         private float[] _featMeanLeft,  _featStdLeft,  _tgtMeanLeft,  _tgtStdLeft;
+
+        // Previous wrist positions in HOT3D frame — for approach_speed computation
+        private Vector3 _prevWristRight = Vector3.zero, _prevWristLeft = Vector3.zero;
+        private float   _prevTimeRight  = -1f,          _prevTimeLeft  = -1f;
 
         // EMA smoothed UME joint angles (22 per hand)
         private float[] _smoothRight = new float[22];
@@ -275,12 +278,14 @@ namespace AuraXR
                 rightCtrl, nearestR, categoryR,
                 _workerRight, _featMeanRight, _featStdRight, _tgtMeanRight, _tgtStdRight,
                 ref _smoothRight, ref _firstRight,
+                ref _prevWristRight, ref _prevTimeRight,
                 RightHand);
 
             LeftHand = RunInference(
                 leftCtrl, nearestL, categoryL,
                 _workerLeft, _featMeanLeft, _featStdLeft, _tgtMeanLeft, _tgtStdLeft,
                 ref _smoothLeft, ref _firstLeft,
+                ref _prevWristLeft, ref _prevTimeLeft,
                 LeftHand);
         }
 
@@ -340,6 +345,7 @@ namespace AuraXR
             Worker worker,
             float[] featMean, float[] featStd, float[] tgtMean, float[] tgtStd,
             ref float[] smooth, ref bool firstFrame,
+            ref Vector3 prevWristH, ref float prevTime,
             HandPose current)
         {
             if (ctrl == null || nearestObj == null || worker == null)
@@ -351,11 +357,10 @@ namespace AuraXR
 
             bool doLog = (Time.frameCount % 60 == 0);
 
-            // 1. Compute direction to object in wrist-local HOT3D frame
+            // 1. World-frame positions in HOT3D coordinate system
             Vector3 wristPosUnity = ctrl.position;
             Vector3 objPosUnity   = nearestObj.position;
             Vector3 wristPosH     = ToHOT3D(wristPosUnity);
-            Quaternion wristRotH  = ToHOT3DQuat(ctrl.rotation);
             Vector3 objPosH       = ToHOT3D(objPosUnity);
 
             Vector3 relWorld = objPosH - wristPosH;
@@ -368,32 +373,54 @@ namespace AuraXR
 
             if (dist < 1e-6f) return current;
 
-            Vector3 relLocal = Quaternion.Inverse(wristRotH) * relWorld;
-            Vector3 dir = relLocal / dist;
+            // dir_world: world-frame unit vector (NOT wrist-local — avoids HOT3D/Unity quat mismatch)
+            Vector3 dirWorld = relWorld / dist;
+
+            // dir_obj_local: rotate delta into object-local frame using object's world rotation
+            Quaternion objRotH  = ToHOT3DQuat(nearestObj.rotation);
+            Vector3 dirObjLocal = Quaternion.Inverse(objRotH) * dirWorld;
+
+            // approach_speed: projection of wrist velocity onto approach direction
+            float now = Time.time;
+            float approachSpeed = 0f;
+            if (prevTime >= 0f)
+            {
+                float dt = now - prevTime;
+                if (dt > 1e-4f)
+                {
+                    Vector3 velWorld = (wristPosH - prevWristH) / dt;
+                    approachSpeed = Vector3.Dot(velWorld, dirWorld);
+                }
+            }
+            prevWristH = wristPosH;
+            prevTime   = now;
 
             // 2. Look up grip category and bbox
             int grip = BopToGrip.TryGetValue(categoryId, out int g) ? g : 0;
             float[] bbox = BopToBbox.TryGetValue(categoryId, out float[] b) ? b : DefaultBbox;
             string[] gripNames = { "Power", "Precision", "Palmar", "Pinch" };
 
-            // 3. Assemble raw 11-dim feature: [dir(3), dist(1), grip_oh(4), bbox(3)]
-            float[] feat = new float[11];
-            feat[0] = dir.x; feat[1] = dir.y; feat[2] = dir.z;
-            feat[3] = dist;
-            feat[4] = grip == 0 ? 1f : 0f; // Power
-            feat[5] = grip == 1 ? 1f : 0f; // Precision
-            feat[6] = grip == 2 ? 1f : 0f; // Palmar
-            feat[7] = grip == 3 ? 1f : 0f; // Pinch
-            feat[8] = bbox[0]; feat[9] = bbox[1]; feat[10] = bbox[2];
+            // 3. Assemble raw 15-dim feature:
+            //    [dir_world(3), dir_obj_local(3), dist(1), approach_speed(1), grip_oh(4), bbox(3)]
+            float[] feat = new float[15];
+            feat[0]  = dirWorld.x;    feat[1]  = dirWorld.y;    feat[2]  = dirWorld.z;
+            feat[3]  = dirObjLocal.x; feat[4]  = dirObjLocal.y; feat[5]  = dirObjLocal.z;
+            feat[6]  = dist;
+            feat[7]  = approachSpeed;
+            feat[8]  = grip == 0 ? 1f : 0f; // Power
+            feat[9]  = grip == 1 ? 1f : 0f; // Precision
+            feat[10] = grip == 2 ? 1f : 0f; // Palmar
+            feat[11] = grip == 3 ? 1f : 0f; // Pinch
+            feat[12] = bbox[0]; feat[13] = bbox[1]; feat[14] = bbox[2];
 
             if (doLog)
-                DLog($"[FEAT_RAW] dir=({feat[0]:F3},{feat[1]:F3},{feat[2]:F3})  dist={feat[3]:F3}  " +
-                     $"grip={gripNames[grip]}({grip}) oh=[{feat[4]},{feat[5]},{feat[6]},{feat[7]}]  " +
-                     $"bbox=({feat[8]:F3},{feat[9]:F3},{feat[10]:F3})");
+                DLog($"[FEAT_RAW] dir_world=({feat[0]:F3},{feat[1]:F3},{feat[2]:F3})  " +
+                     $"dir_obj=({feat[3]:F3},{feat[4]:F3},{feat[5]:F3})  " +
+                     $"dist={feat[6]:F3}  approach={feat[7]:F3}  " +
+                     $"grip={gripNames[grip]}({grip})  bbox=({feat[12]:F3},{feat[13]:F3},{feat[14]:F3})");
 
             // 4. Normalize
-            float[] rawFeat = (float[])feat.Clone();
-            for (int i = 0; i < 11; i++)
+            for (int i = 0; i < 15; i++)
                 feat[i] = (feat[i] - featMean[i]) / featStd[i];
 
             if (doLog)
@@ -402,12 +429,16 @@ namespace AuraXR
                 DLog($"[FEAT_NORM] [{normStr}]");
             }
 
-            // 5. Split into spatial (4) and object (7) inputs
-            float[] spatialInput = new float[] { feat[0], feat[1], feat[2], feat[3] };
-            float[] objectInput  = new float[] { feat[4], feat[5], feat[6], feat[7], feat[8], feat[9], feat[10] };
+            // 5. Split into spatial (8) and object (7) inputs
+            float[] spatialInput = new float[] {
+                feat[0], feat[1], feat[2], feat[3], feat[4], feat[5], feat[6], feat[7]
+            };
+            float[] objectInput = new float[] {
+                feat[8], feat[9], feat[10], feat[11], feat[12], feat[13], feat[14]
+            };
 
             // 6. Run model
-            using var spatialTensor = new Tensor<float>(new TensorShape(1, 4), spatialInput);
+            using var spatialTensor = new Tensor<float>(new TensorShape(1, 8), spatialInput);
             using var objectTensor  = new Tensor<float>(new TensorShape(1, 7), objectInput);
 
             worker.SetInput("spatial_input", spatialTensor);

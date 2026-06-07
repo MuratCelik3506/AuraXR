@@ -24,59 +24,9 @@ This project aims to develop an AI model that predicts the hand shape of a VR co
 
 ## Approach: Proximity-Based Anticipatory Grasp
 
-The human hand pre-shapes itself as it reaches toward an object. The system covers 4 states:
+A human hand begins adapting its shape *before* contact — when reaching for a mug, fingers start curling at ~40 cm, well before touching the object. This "pre-shaping" is driven by the perceived object type and approach angle.
 
-### State 0: Default (> 40cm)
-
-**State:** Hand is far from any object
-
-**Behavior:**
-- Model does not run
-- Hand stays in fixed default pose — `FIXED_DEFAULT_POSE` (measured once: natural, slightly curled finger position when holding the controller)
-
----
-
-### Phase 1: Pre-Shape (10cm – 40cm)
-
-**State:** Hand is beginning to approach the object
-
-**Behavior:**
-- Hand leaves its default pose
-- Preparation begins based on object type
-- Example: fingers open and palm rounds for a cup
-- Example: thumb and index finger prepare for a pen
-
-**Model Task:** Predict "preparation pose" based on object type and dimensions
-
----
-
-### Phase 2: Approach (< 10cm)
-
-**State:** Hand is very close to the object, ready to grasp
-
-**Behavior:**
-- Hand transitions to full grip position
-- Fingers orient toward the object surface
-- Pose becomes more precise as distance decreases
-- Smooth interpolated transition
-
-**Model Task:** Predict "grasp pose" appropriate for object shape
-
----
-
-### Phase 3: Grasp (Contact + Grip)
-
-**State:** Hand has made contact, user pressed grip button
-
-**Behavior:**
-- Fingers wrap around the object
-- Finger angles adjusted to object shape
-- Physical attachment established (object sticks to hand)
-- Pose maintained during hold
-
-**Model Task:** Predict "final grasp pose" based on object position and grip category — pose is locked and held for the duration of the grasp
-
----
+AuraXR models this by training a small MLP on HOT3D data where real hand poses during manipulation are labeled by distance. The model learns to predict the correct hand pose for any (object type, object size, approach direction, distance) tuple, enabling smooth anticipatory animation in VR without any camera or glove hardware.
 
 ## Dataset: HOT3D
 
@@ -117,49 +67,66 @@ The human hand pre-shapes itself as it reaches toward an object. The system cove
 
 | Parameter | Size | Description |
 |-----------|------|-------------|
-| Object relative position | 3 | x, y, z offset in wrist frame — encodes both direction and distance |
-| Grip category | 4 | Power / Precision / Palmar / Pinch — one-hot |
-| Object dimensions | 3 | Bounding box half-extents (x, y, z in meters) |
-| Distance | 1 | Scalar, in meters |
-| **Total** | **11** | |
+| dir_world | 3 | Unit vector wrist→object in HOT3D world frame |
+| dir_obj_local | 3 | Same vector rotated into the object's local frame (encodes which face is approached) |
+| distance | 1 | Euclidean distance wrist→object in meters |
+| approach_speed | 1 | dot(wrist_velocity, dir_world) — positive = moving toward object |
+| grip_onehot | 4 | Power / Precision / Palmar / Pinch — one-hot |
+| bbox half-extents | 3 | Object bounding box half-extents [x, y, z] in meters |
+| **Total** | **15** | split as spatial(8) + object(7) for the model |
 
-> **Why not wrist position/rotation?** Grip shape depends on where the object is relative to the hand and what type of object it is — not on where the hand is in the room. Absolute wrist position varies across recordings and does not generalize. Wrist rotation is already implicit in the relative position (which is computed in the wrist frame). Dropping both keeps the model simple and coordinate-system agnostic.
+> **Why not wrist-local direction?** Computing direction in the wrist frame would always yield `(0,0,1)` in a canonical frame — trivially useless. Using the real HOT3D wrist quaternion would create a training-inference mismatch with Unity's OVR controller. World-frame direction avoids this: only positions are needed. Absolute wrist position is excluded for the same reason — it varies across recordings and does not generalize.
 
-> **Why not 33 one-hot?** Representing objects by physical properties rather than ID allows the model to generalize to unseen objects. Learning "large cylinder 12cm ahead" is far more meaningful than memorizing "object_id=17". The 33 HOT3D objects naturally collapse into 4 grip categories.
+> **Why not 33 one-hot?** Representing objects by physical properties (grip type + size) rather than ID lets the model generalize to unseen objects. The 33 HOT3D objects naturally collapse into 4 grip categories.
 
 ### Output
 
 | Parameter | Size | Description |
 |-----------|------|-------------|
-| Joint angles | 22 | UmeTrack format — finger angles only |
+| joint_angles | 22 | UME joint angles (radians, normalized) — joints 20–21 always 0 (placeholder) |
+| wrist_rot_6d | 6 | Palm orientation as 6D continuous rotation; decoded via Gram-Schmidt in Unity |
 
-> **Wrist does not come from the model.** The wrist is anchored to the controller via a fixed physical offset. The model only predicts fingers. See HOT3D → Unity Bridge.
+> The model predicts **both** finger shape and palm orientation. Wrist position is not predicted — it is always anchored to the controller via a fixed physical offset. See `handPivotOffset` in `AuraXRInferenceManager.cs`.
+### Architecture — Two-Branch MLP (~294k parameters)
 
-### Architecture — Two-Branch MLP
-
-Spatial approach information and object type/shape information are different kinds of input. Two separate encoders are used:
+Spatial approach information and object type/shape information are different kinds of input. Two separate encoders are used before fusion:
 
 ```
-Relative position (3) + Distance (1)     →  [Spatial Encoder  2×FC]  →  spatial_emb (32)
-Grip category (4) + Size (3)             →  [Object Encoder   2×FC]  →  obj_emb     (32)
-                                                                               ↓
-                                                      [Concat → Prediction Head 2×FC]
-                                                                               ↓
-                                                                   Joint angles (22)
+spatial_input (B, 8)                        object_input (B, 7)
+[dir_world(3), dir_obj_local(3),            [grip_oh(4), bbox(3)]
+ dist(1), approach_speed(1)]
+        │                                          │
+  FC(8→256) + LayerNorm + ReLU             FC(7→128) + LayerNorm + ReLU
+  Dropout(0.20)                            FC(128→128) + ReLU
+  FC(256→128) + ReLU                               │
+        │                                          │
+        └──────────────── cat(256) ────────────────┘
+                               │
+                         FC(256→256) + ReLU + Dropout(0.40)
+                         FC(256→256) + ReLU + Dropout(0.20)
+                               │
+        ┌──────────────────────┼─────────────────────────┐
+        │                      │                         │
+  5 × Finger Heads      Wrist Rotation Head      Grip Classifier
+  (thumb–pinky)         FC(256→64)+ReLU          (train only, not in ONNX)
+  FC(256→64)+ReLU       Dropout(0.10)            FC(256→32)+ReLU
+  Dropout(0.10)         FC(64→6)                 FC(32→4)
+  FC(64→4)                    │
+        │               wrist_rot_6d (B, 6)
+   cat(20) + zeros(2)
+        │
+  joint_angles (B, 22)
 ```
 
-- Each encoder: 2 fully-connected layers, ReLU activation
-- Prediction head: 2 fully-connected layers, Tanh on final layer
-- Tanh output [-1, 1] → denormalized back to real angle values
-- Normalization parameters stored in model metadata file
+- **Linear output** (no Tanh) — range enforced via loss range penalty instead of output bounding
+- **Per-finger heads** — independent learned parameters per finger; finger-specific loss weights
+- **Grip classifier** — active only during training; regularizes trunk to stay grip-category-aware
+- **Separate models** for left and right hand (same architecture, different weights)
 
 ### Why Two Separate Models?
 
-- Separate model for left hand
-- Separate model for right hand
-- Advantage: Independent training, easier to debug
-- Same architecture, different weights
-
+- Separate model for left hand, separate model for right hand
+- Advantage: independent training, easier to debug, each model specializes
 ---
 
 ## Unity Integration
@@ -172,20 +139,27 @@ Grip category (4) + Size (3)             →  [Object Encoder   2×FC]  →  obj
 ### Logic
 
 1. **Every frame:**
-   - Get controller position
-   - Detect closest object
-   - Calculate distance
+   - Get controller position and rotation
+   - Detect closest object within 40cm (`ProximityDetector`)
+   - Compute distance, dir_world, dir_obj_local, approach_speed
 
 2. **Decision based on distance:**
-   - > 40cm: Model does not run, FIXED_DEFAULT_POSE
-   - 10–40cm: Model → pre-shape prediction + interpolation
-   - < 10cm: Model → grip prediction
-   - Contact + Grip button: Final grip pose locked
+   - > 40cm: Model does not run → fixed neutral pose
+   - 10–40cm: Model runs → pre-shape prediction
+   - < 10cm: Model runs → grip prediction
+   - Contact + grip button: pose locks (grab override blends to closed fist)
 
-3. **Visualization:**
-   - UmeTrack joint angles → apply to Unity hand model
-   - Smooth transition (Lerp/Slerp)
-   - Both hands updated independently
+3. **Inference every N frames** (default N=2, ~36 fps at 72 Hz):
+   - Assemble 15-dim feature vector
+   - Normalize with `model_meta.json` stats
+   - Run ONNX model via Unity Sentis
+   - Denormalize 22 UME angles and 6D wrist rotation
+   - EMA smooth angles (α=0.35)
+   - Map UME[22] → MANO[15] → drive finger rig
+
+4. **Every frame:**
+   - Position virtual hand at `controller.position + predictedRot * handPivotOffset`
+   - Apply cached rotation from last inference
 
 ### Contact Detection
 
@@ -252,14 +226,13 @@ new_pose = current_pose[t-1] + clamp(delta, -max_delta, max_delta)
 | Flat/Wide | Plate, keyboard, phone | Palmar grip (palm) |
 | Small | Mouse, puzzle | Pinch grip |
 
-### By Size
+### By Size (bbox half-extents as stored in grip_categories.py)
 
-| Category | Diameter | Example Objects |
-|----------|---------|----------------|
-| Small | < 12cm | Mouse, puzzle, box |
-| Medium | 12–22cm | Cup, bottle, phone |
-| Large | > 22cm | Plate, keyboard, vase |
-
+| Category | Half-extent range | Example Objects |
+|----------|------------------|----------------|
+| Small | < 0.05m | Mouse, puzzle, small holder |
+| Medium | 0.05–0.10m | Cup/mug, bottle, phone |
+| Large | > 0.10m | Plate, keyboard, vase |
 ---
 
 ## Testing Process
@@ -336,29 +309,33 @@ HOT3D has no controller data. Instead, every frame provides a **wrist position a
 
 ### Why This Is Not a Problem
 
-The model input is the object's position **relative to the hand in the hand's own frame** — not the hand's absolute pose in the world. This relative position is computed differently in training vs. runtime, but the result is equivalent:
+The model uses **world-frame direction** (not wrist-local), so no wrist quaternion is needed at runtime:
 
 ```
-Training  →  rel_pos = R_wrist^T × (obj_world − wrist_world)      (HOT3D wrist data)
-Unity     →  rel_pos = R_controller^T × (obj_world − ctrl_world)  (real controller data)
+Training  →  dir_world = (obj_world − wrist_world) / dist     (HOT3D wrist position only)
+Unity     →  dir_world = (obj_world − ctrl_world)  / dist     (controller position only)
 ```
 
-When holding a Quest controller, controller position ≈ wrist position and controller rotation ≈ wrist rotation. So the relative position computed from either source is virtually identical.
+Since controller position ≈ wrist position when holding a Quest controller, the two are virtually identical. No wrist quaternion from HOT3D is used — this eliminates any tracking-system mismatch between HOT3D's UME tracker and Unity's OVR system.
+
+The wrist rotation output (`wrist_rot_6d`) is predicted **relative to the approach direction** via a canonical frame (`LookRotation(dir_world)`), so it too requires only the world-frame direction — no absolute wrist quaternion.
 
 ### Wrist Visualization
 
-The wrist is anchored to the controller with a fixed physical offset. The model only predicts finger angles — it never touches wrist position:
+The wrist position is anchored to the controller via a fixed physical offset. The model predicts **palm orientation** (wrist_rot_6d) and **finger angles** (joint_angles):
 
 ```csharp
-// Wrist — always coincides with the controller
-anchor.position = controller.position + FIXED_GRIP_OFFSET;
-anchor.rotation = controller.rotation * FIXED_GRIP_ROTATION;
+// Position: always anchored to controller + measured offset
+virtualHand.position = controller.position + predictedRot * handPivotOffset;
 
-// Model updates fingers only
-ApplyFingerAngles(modelOutput.jointAngles);
+// Rotation: from model wrist_rot_6d prediction (decoded via Gram-Schmidt)
+virtualHand.rotation = predictedRot;
+
+// Fingers: from model joint_angles prediction (UME[22] → MANO[15])
+ApplyFingerAngles(manoJointAngles);
 ```
 
-`FIXED_GRIP_OFFSET` and `FIXED_GRIP_ROTATION` are measured once physically: the position of the wrist center relative to the Quest controller's tracked origin when held naturally.
+`handPivotOffset = (0.1685, 0, 0.0351)` — measured from one session. This shifts the wrist mesh 16.85 cm in X and 3.51 cm in Z from the Quest 3 controller tracking origin to match where the wrist physically sits when holding the controller.
 
 ### Coordinate System
 
@@ -368,10 +345,13 @@ Both HOT3D and Unity use world space. HOT3D world space is per-recording (each s
 
 | | Training (HOT3D) | Unity Runtime |
 |---|---|---|
-| Wrist/controller data | HOT3D wrist_transform | Real controller transform |
-| Relative position | `R_wrist^T × (obj − wrist)` | `R_ctrl^T × (obj − ctrl)` |
-| Object info | Ground truth annotation | ProximityDetector |
-| Wrist visualization | — | Controller + FIXED_GRIP_OFFSET |
+| Wrist position | HOT3D `wrist_xform.t_xyz` | Controller `position` |
+| Wrist rotation | Not used in spatial features | Not used in spatial features |
+| dir_world | `(obj − wrist) / dist` (world frame) | `(obj − ctrl) / dist` (world frame) |
+| dir_obj_local | `rotate(inv(q_obj), dir_world)` | `ToHOT3DQuat(obj.rotation)^-1 * dirWorld` |
+| approach_speed | `dot(wrist_velocity, dir_world)` | `dot(ctrl_velocity_hot3d, dirWorld)` |
+| Object info | Ground truth CSV annotation | `ProximityDetector` + `InteractableObject` |
+| Wrist visualization | — | `controller.position + predictedRot * handPivotOffset` |
 
 ---
 
@@ -379,22 +359,33 @@ Both HOT3D and Unity use world space. HOT3D world space is per-recording (each s
 
 ### Data Preparation
 
-1. Extract frames from HOT3D clips
-2. **Keep only frames where distance is 0–40cm** — model runs from 40cm in Unity, frames beyond that are unused
-3. For each frame:
-   - Hand pose (UmeTrack 22 joints)
-   - Closest object type and dimensions
-   - Hand-object distance
-4. Label by distance thresholds:
-   - Pre-shape (10–40cm): Preparation pose sample
-   - Grip (< 10cm): Grasp pose sample
+```bash
+python build_dataset.py --data_dir ../data/quest3/ --output_dir ../data/right/ --hand right
+python build_dataset.py --data_dir ../data/quest3/ --output_dir ../data/left/  --hand left
+```
+
+1. Extract frames from HOT3D Quest 3 ZIPs
+2. Keep only frames where distance ≤ 40cm and `hand_confidence ≥ 0.70`
+3. For each frame: compute 15-dim feature vector (dir_world, dir_obj_local, dist, approach_speed, grip_oh, bbox)
+4. Label: `"grip"` if dist < 10cm, else `"pre_shape"`
+5. 85/15 train/val split by whole sequence (no frame-level leakage)
+6. Compute per-feature z-score normalization on training set only
+7. Oversample grip frames 10× in training split to balance class distribution
+8. Save to `dataset.h5` (features, targets, wrist_rot_6d, distances, labels)
 
 ### Training
 
-- Loss: **Weighted MSE** — higher weight for 0–10cm frames (few but critical)
-- Optimizer: Adam
-- Batch size: 64
-- Epochs: 50–100
+```bash
+python train.py --data_dir ../data/right/ --output_dir ../checkpoints/right/ --resume
+python train.py --data_dir ../data/left/  --output_dir ../checkpoints/left/  --resume
+```
+
+- Loss: **Compound loss** — weighted Huber (β=0.5) over joints 0–19, 2× weight for grip frames (< 10cm), range penalty [0, 2.0 rad], DIP-PIP coupling (DIP ≈ 0.67×PIP), grip classifier CE; plus 0.3 × wrist rotation MSE
+- Optimizer: **AdamW** (lr=5e-3, weight_decay=3e-4)
+- Batch size: **131072** (entire training set fits in device memory — one gradient step per epoch)
+- Epochs: up to **50000** (early stopping: patience=2000)
+- LR schedule: Linear warmup (200 epochs) + CosineAnnealingWarmRestarts (T₀=4000, T_mult=2)
+- Hardware: auto-detects CUDA > MPS (Apple Silicon) > CPU
 
 ### Export
 
@@ -423,7 +414,7 @@ Both HOT3D and Unity use world space. HOT3D world space is per-recording (each s
 | Challenge | Solution |
 |-----------|----------|
 | Far frames corrupt training | Use only 0–40cm frames |
-| Close frames are few, loss dominated by easy cases | Weighted MSE, higher weight for close frames |
+| Close frames are few, loss dominated by easy cases | Grip 10× oversampling + 2× Huber weight for grip frames in compound loss |
 | No evaluation protocol | Define Likert + NASA-TLX + task time |
 
 ### Medium — Fix If Needed
@@ -447,41 +438,45 @@ Both HOT3D and Unity use world space. HOT3D world space is per-recording (each s
 
 ## Project Phases
 
-### Phase 1: Data Preparation
-- [ ] Extract training data from HOT3D
-- [ ] Build hand-object pairs
-- [ ] Label by distance thresholds
+### Phase 1: Data Preparation ✅ DONE
+- [x] Extract training data from HOT3D Quest 3 ZIPs
+- [x] Build 15-dim feature vectors (dir_world + dir_obj_local + dist + approach_speed + grip_oh + bbox)
+- [x] Label by distance thresholds (grip/pre_shape), 85/15 train/val split by sequence
+- [x] Grip frame 10× oversampling; normalization stats stored in dataset.h5
 
-### Phase 2: Model Training
-- [ ] UmeTrack-based MLP model
-- [ ] Separate training for left and right hand
-- [ ] Validation and testing
+### Phase 2: Model Training ✅ DONE
+- [x] Two-branch MLP with per-finger heads (~294k params)
+- [x] Compound loss (Huber + range penalty + DIP-PIP coupling + grip classifier)
+- [x] Separate training for left and right hand
+- [x] Evaluation: right MAE ≈ 14.0°, left MAE ≈ 13.8° (target < 5°)
 
-### Phase 3: ONNX Export
-- [ ] PyTorch → ONNX conversion
-- [ ] Input/output format validation
+### Phase 3: ONNX Export ✅ DONE
+- [x] PyTorch → ONNX (opset 14, bitwise validation with ONNX Runtime)
+- [x] model_meta.json with normalization stats copied to onnx/ for Unity
 
-### Phase 4: Unity Integration
-- [ ] Meta XR SDK setup
-- [ ] ONNX model loading (Sentis)
-- [ ] Proximity system implementation
-- [ ] Hand model visualization
+### Phase 4: Unity Integration 🔄 IN PROGRESS
+- [x] Meta XR SDK setup, Unity Sentis ONNX loading
+- [x] Feature assembly (AuraXRFeatureAssembler.cs)
+- [x] Inference pipeline (AuraXRInferenceManager.cs)
+- [x] Hand rig visualization (HandRigController.cs, HandSkeletonAnchor.cs)
+- [x] Interaction and task system (VirtualHandGrab.cs, TaskScoreUI.cs)
+- [ ] Quest 3 on-device validation
 
-### Phase 5: Testing & Refinement
-- [ ] Testing on Quest
-- [ ] Performance optimization
-- [ ] User experience evaluation
+### Phase 5: Testing & Refinement ⏳ WAITING
+- [ ] On-device testing on Quest 3 (BackendType.CPU first)
+- [ ] Inference timing (target < 5ms/frame)
+- [ ] Ablation table (feature masking experiments)
+- [ ] User study (IRB required)
 
 ---
 
 ## Expected Results
 
-1. **Naturally appearing hand movement** — when approaching an object
-2. **Object-specific grip** — appropriate grasp for each object
-3. **Smooth transitions** — fluidity between phases
-4. **Real-time performance** — 72+ FPS on Quest
-5. **Two-hand support** — independent and coordinated
-
+1. **Naturally appearing hand pre-shaping** — fingers begin curling at ~40cm approach
+2. **Object-specific grip** — power grip for mug, precision grip for spoon, etc.
+3. **Smooth transitions** — EMA smoothing (α=0.35) eliminates frame-to-frame jitter
+4. **Real-time performance** — ~294k parameter MLP targets < 5ms/frame on Quest 3
+5. **Two-hand support** — left and right models run independently each frame
 ---
 
 ## References
