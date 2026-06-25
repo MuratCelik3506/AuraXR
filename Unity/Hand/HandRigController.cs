@@ -124,10 +124,26 @@ namespace AuraXR
                  "Use in Editor / debug to make the OVR hand visible even without Quest tracking.")]
         public bool forceVisible = false;
 
+        [Header("MANO PCA Decoder")]
+        [Tooltip("Drag pca_right.json or pca_left.json here. Auto-loaded from Resources/pca_right or pca_left if null. " +
+                 "Export with: python src/mano_fk.py --export_pca data/models/mano/pca_right.json right")]
+        public TextAsset pcaJson;
+
+        [Tooltip("Use proper MANO PCA → quaternion decoding instead of raw PCA-as-angle. " +
+                 "Requires pca_right.json / pca_left.json in Assets/AuraXR/Resources/.")]
+        public bool useMANODecoder = true;
+
         // Rest-pose rotations captured before OVR drives the bones
         private Quaternion[] _restPose;
         private float[]      _smoothedAngles;
         private float        _grabBlend = 0f;
+
+        // ── MANO Decoder state ────────────────────────────────────────────────────
+        private MANODecoder  _manoDecoder;
+        private Quaternion[] _manoToOVR;     // per-joint MANO-frame → OVR-bone-frame correction
+        private Quaternion[] _smoothedQuat;  // per-joint smoothed rotation (decoder path)
+        private float[]      _scaledPca;     // scratch buffer for debug angle scaling
+        private bool         _decoderReady;  // true when decoder + frame offsets are ready
 
         // Set to true until fingerJoints are populated (either manually or from OVRSkeleton)
         private bool _needsBoneInit = true;
@@ -158,6 +174,25 @@ namespace AuraXR
 
             if (grabSystem == null)
                 grabSystem = FindAnyObjectByType<VirtualHandGrab>();
+
+            // ── MANO PCA Decoder ─────────────────────────────────────────────────
+            if (useMANODecoder)
+            {
+                _manoDecoder = new MANODecoder();
+                var jsonAsset = pcaJson
+                    ?? Resources.Load<TextAsset>(isLeftHand ? "pca_left" : "pca_right");
+                if (jsonAsset != null)
+                {
+                    bool ok = _manoDecoder.LoadFromJson(jsonAsset);
+                    RLog($"MANODecoder {(isLeftHand ? "L" : "R")}: {(ok ? "loaded OK" : "FAILED to parse JSON")}");
+                }
+                else
+                {
+                    RLog($"MANODecoder {(isLeftHand ? "L" : "R")}: pca_*.json not found in Resources — " +
+                         "copy data/models/mano/pca_right.json + pca_left.json to Assets/AuraXR/Resources/ — " +
+                         "falling back to raw PCA-as-angle mode.");
+                }
+            }
         }
 
         private void OnDestroy() { _rigLog?.Close(); }
@@ -228,36 +263,70 @@ namespace AuraXR
             {
                 int applied = 0;
                 int count   = Mathf.Min(pose.ManoJointAngles.Length, fingerJoints.Length);
-                if (_smoothedAngles == null || _smoothedAngles.Length < count)
-                    _smoothedAngles = new float[count];
-                for (int i = 0; i < count; i++)
+
+                if (_decoderReady)
                 {
-                    if (fingerJoints[i] == null) continue;
+                    // ── MANO PCA decoder path ────────────────────────────────────────
+                    // Scale PCA components for debug multiplier (scales deviation from rest).
+                    for (int i = 0; i < 15; i++)
+                        _scaledPca[i] = pose.ManoJointAngles[i] * debugAngleMultiplier;
 
-                    // Apply per-joint sign convention (HOT3D vs. rig axis mismatch)
-                    float sign = (jointSignMultipliers != null && i < jointSignMultipliers.Length)
-                                  ? jointSignMultipliers[i] : 1f;
+                    Quaternion[] decoded = _manoDecoder.Decode(_scaledPca);
 
-                    // Blend inference angle with grab-pose angle
-                    float inferenceRad = pose.ManoJointAngles[i] * sign;
-                    float grabRad      = (grabPoseAnglesRad != null && i < grabPoseAnglesRad.Length)
-                                         ? grabPoseAnglesRad[i] : inferenceRad;
-                    float targetRad    = Mathf.Lerp(inferenceRad, grabRad, _grabBlend);
+                    if (_smoothedQuat == null || _smoothedQuat.Length < count)
+                        _smoothedQuat = new Quaternion[count];
 
-                    // Per-frame smoothing
-                    _smoothedAngles[i] = Mathf.Lerp(targetRad, _smoothedAngles[i], smoothing);
+                    for (int i = 0; i < count; i++)
+                    {
+                        if (fingerJoints[i] == null) continue;
 
-                    float deg = Mathf.Clamp(
-                        _smoothedAngles[i] * Mathf.Rad2Deg * debugAngleMultiplier,
-                        jointMinAngleDeg, jointMaxAngleDeg);
-                    Quaternion rest = (_restPose != null && i < _restPose.Length)
-                                       ? _restPose[i] : Quaternion.identity;
-                    // Correct formula: flex around the bone's OWN local axis.
-                    // rest * bendAxis transforms bendAxis from bone-local → parent frame.
-                    // AngleAxis(...) * rest then adds the flexion on top of the rest pose.
-                    Vector3 axis = rest * bendAxis;
-                    fingerJoints[i].localRotation = Quaternion.AngleAxis(deg, axis) * rest;
-                    applied++;
+                        // Map MANO local-frame rotation into OVR bone frame
+                        Quaternion predictedRot = _manoToOVR[i] * decoded[i];
+
+                        // Grab fist in OVR space (angle-axis around rest pose)
+                        Quaternion rest = (_restPose != null && i < _restPose.Length)
+                                           ? _restPose[i] : Quaternion.identity;
+                        float grabDeg = (grabPoseAnglesRad != null && i < grabPoseAnglesRad.Length)
+                            ? Mathf.Clamp(grabPoseAnglesRad[i] * Mathf.Rad2Deg, jointMinAngleDeg, jointMaxAngleDeg)
+                            : 0f;
+                        Quaternion grabRot = Quaternion.AngleAxis(grabDeg, rest * bendAxis) * rest;
+
+                        // Blend: model prediction ↔ grab fist
+                        Quaternion targetRot = Quaternion.Slerp(predictedRot, grabRot, _grabBlend);
+
+                        // Per-frame quaternion smoothing
+                        _smoothedQuat[i] = Quaternion.Slerp(targetRot, _smoothedQuat[i], smoothing);
+
+                        fingerJoints[i].localRotation = _smoothedQuat[i];
+                        applied++;
+                    }
+                }
+                else
+                {
+                    // ── Fallback: raw PCA-as-angle path ─────────────────────────────
+                    // Used when pca_*.json is not loaded. Less accurate but functional.
+                    if (_smoothedAngles == null || _smoothedAngles.Length < count)
+                        _smoothedAngles = new float[count];
+                    for (int i = 0; i < count; i++)
+                    {
+                        if (fingerJoints[i] == null) continue;
+
+                        float sign = (jointSignMultipliers != null && i < jointSignMultipliers.Length)
+                                      ? jointSignMultipliers[i] : 1f;
+                        float inferenceRad = pose.ManoJointAngles[i] * sign;
+                        float grabRad      = (grabPoseAnglesRad != null && i < grabPoseAnglesRad.Length)
+                                             ? grabPoseAnglesRad[i] : inferenceRad;
+                        float targetRad    = Mathf.Lerp(inferenceRad, grabRad, _grabBlend);
+                        _smoothedAngles[i] = Mathf.Lerp(targetRad, _smoothedAngles[i], smoothing);
+                        float deg = Mathf.Clamp(
+                            _smoothedAngles[i] * Mathf.Rad2Deg * debugAngleMultiplier,
+                            jointMinAngleDeg, jointMaxAngleDeg);
+                        Quaternion rest = (_restPose != null && i < _restPose.Length)
+                                           ? _restPose[i] : Quaternion.identity;
+                        Vector3 axis = rest * bendAxis;
+                        fingerJoints[i].localRotation = Quaternion.AngleAxis(deg, axis) * rest;
+                        applied++;
+                    }
                 }
 
                 // ── Abduction (finger spread) on MCP joints only ──────────────────
@@ -462,6 +531,28 @@ namespace AuraXR
             {
                 _restPose[i]       = fingerJoints[i] != null ? fingerJoints[i].localRotation : Quaternion.identity;
                 _smoothedAngles[i] = 0f;
+            }
+
+            // ── MANO→OVR frame offset ────────────────────────────────────────────
+            // Compute per-joint frame correction so MANO zero-pose maps to OVR rest pose:
+            //   manoToOVR[i] = restPose[i] * Inverse(manoZeroPose[i])
+            // → At PCA=0: decoded = manoZero → final = manoToOVR * manoZero = restPose ✓
+            // → At other PCA: the rotation relative to rest is correctly expressed in OVR frame
+            _decoderReady = false;
+            if (useMANODecoder && _manoDecoder != null && _manoDecoder.IsLoaded)
+            {
+                Quaternion[] manoZero = _manoDecoder.Decode(new float[15]);
+                _manoToOVR    = new Quaternion[fingerJoints.Length];
+                _smoothedQuat = new Quaternion[fingerJoints.Length];
+                _scaledPca    = new float[15];
+                for (int i = 0; i < fingerJoints.Length; i++)
+                {
+                    Quaternion mRest = (i < 15) ? manoZero[i] : Quaternion.identity;
+                    _manoToOVR[i]    = _restPose[i] * Quaternion.Inverse(mRest);
+                    _smoothedQuat[i] = _restPose[i];
+                }
+                _decoderReady = true;
+                RLog($"MANODecoder frame offsets ready for {fingerJoints.Length} joints.");
             }
         }
     }

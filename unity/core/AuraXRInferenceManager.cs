@@ -74,7 +74,7 @@ namespace AuraXR
         [Tooltip("If true, virtual hand root rotation follows the physical controller exactly. " +
                  "Keep enabled for 1:1 controller/hand alignment; disable only when evaluating " +
                  "model-predicted wrist orientation.")]
-        public bool lockWristRotationToController = false;
+        public bool lockWristRotationToController = true;
 
         [Header("Controller → Hand Visual Calibration")]
         [Tooltip("Controller-local wrist offset for the left virtual hand. This positions the " +
