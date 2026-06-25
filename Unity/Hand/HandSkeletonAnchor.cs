@@ -34,18 +34,32 @@ namespace AuraXR
             Vector3    targetPos = transform.position;
             Quaternion targetRot = transform.rotation;
 
-            // Compute the change in wrist pose
-            Vector3    posOffset = targetPos - wrist.position;
-            Quaternion rotDelta  = targetRot * Quaternion.Inverse(wrist.rotation);
+            // Snapshot every bone's CURRENT world pose BEFORE touching wrist.
+            // Setting wrist.position/rotation propagates to children (because they're
+            // parented to wrist), so reading bone.position inside the apply-loop would
+            // see post-wrist-move values. That leads to a double-rotation on children.
+            Vector3    wristPosOrig = wrist.position;
+            Quaternion wristRotOrig = wrist.rotation;
+            Quaternion rotDelta     = targetRot * Quaternion.Inverse(wristRotOrig);
 
-            // Re-root all bones: translate + rotate around the new wrist origin
-            foreach (var bone in bones)
+            int n = bones.Count;
+            var origPos = new Vector3[n];
+            var origRot = new Quaternion[n];
+            for (int i = 0; i < n; i++)
             {
-                if (bone.Transform == null) continue;
-                // Rotate position around the old wrist, then translate
-                Vector3 relPos = bone.Transform.position - wrist.position;
-                bone.Transform.position = targetPos + rotDelta * relPos;
-                bone.Transform.rotation = rotDelta * bone.Transform.rotation;
+                if (bones[i].Transform == null) continue;
+                origPos[i] = bones[i].Transform.position;
+                origRot[i] = bones[i].Transform.rotation;
+            }
+
+            // Re-root: rotate around old wrist origin, then translate to target wrist.
+            for (int i = 0; i < n; i++)
+            {
+                var t = bones[i].Transform;
+                if (t == null) continue;
+                Vector3 relPos = origPos[i] - wristPosOrig;
+                t.position = targetPos + rotDelta * relPos;
+                t.rotation = rotDelta * origRot[i];
             }
         }
     }

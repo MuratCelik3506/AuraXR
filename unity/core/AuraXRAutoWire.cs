@@ -47,6 +47,10 @@ namespace AuraXR
             if (wireHandSkeletonAnchors)     WireHandSkeletonAnchors();
             WireProximityDetector();
             WireFeatureAssemblerControllers();
+            WireHandRigControllers();
+            WireInferenceManagerVirtualHands();
+            WireIKRefinement();
+            EnsureObjectColliders();
             if (setHandMaterialsTransparent) SetHandMaterialsTransparent();
 
             Debug.Log("[AutoWire] Wiring complete. Self-destroying.");
@@ -72,21 +76,21 @@ namespace AuraXR
 
             if (hpv.leftController == null)
             {
-                var lc = FindGoByNameAny("LeftHandAnchor", "LeftControllerAnchor",
-                                         "OVRLeftControllerVisual", "LeftHandTransform",
-                                         "LeftControllerVisual");
+                var lc = FindTrackingAnchor(true);
                 if (lc != null) { hpv.leftController = lc.transform; Log("HPV: leftController → " + lc.name); }
                 else Debug.LogWarning("[AutoWire] HPV: left controller anchor not found — try 'LeftHandAnchor'.");
             }
+            else if (IsProbablyControllerVisual(hpv.leftController))
+                WarnVisualAssigned("HPV.leftController", hpv.leftController);
 
             if (hpv.rightController == null)
             {
-                var rc = FindGoByNameAny("RightHandAnchor", "RightControllerAnchor",
-                                          "OVRRightControllerVisual", "RightHandTransform",
-                                          "RightControllerVisual");
+                var rc = FindTrackingAnchor(false);
                 if (rc != null) { hpv.rightController = rc.transform; Log("HPV: rightController → " + rc.name); }
                 else Debug.LogWarning("[AutoWire] HPV: right controller anchor not found — try 'RightHandAnchor'.");
             }
+            else if (IsProbablyControllerVisual(hpv.rightController))
+                WarnVisualAssigned("HPV.rightController", hpv.rightController);
         }
 
         // ── VirtualHandGrab ───────────────────────────────────────────────────
@@ -108,15 +112,19 @@ namespace AuraXR
 
             if (grab.leftController == null)
             {
-                var lc = FindGoByNameAny("LeftHandAnchor", "LeftControllerAnchor", "OVRLeftControllerVisual");
+                var lc = FindTrackingAnchor(true);
                 if (lc != null) { grab.leftController = lc.transform; Log("VHGrab: leftController → " + lc.name); }
             }
+            else if (IsProbablyControllerVisual(grab.leftController))
+                WarnVisualAssigned("VirtualHandGrab.leftController", grab.leftController);
 
             if (grab.rightController == null)
             {
-                var rc = FindGoByNameAny("RightHandAnchor", "RightControllerAnchor", "OVRRightControllerVisual");
+                var rc = FindTrackingAnchor(false);
                 if (rc != null) { grab.rightController = rc.transform; Log("VHGrab: rightController → " + rc.name); }
             }
+            else if (IsProbablyControllerVisual(grab.rightController))
+                WarnVisualAssigned("VirtualHandGrab.rightController", grab.rightController);
         }
 
         // ── AuraXRInferenceManager ────────────────────────────────────────────
@@ -140,6 +148,24 @@ namespace AuraXR
             }
             else
                 Log("InfMgr: featureAssembler already assigned — skipped.");
+
+            // Wire ObjectSDFDatabase (PCA embeddings) for LSTM v4 mode
+            if (inf.sdfDatabase == null)
+            {
+                inf.sdfDatabase = FindAny<ObjectSDFDatabase>();
+                if (inf.sdfDatabase != null)
+                    Log($"InfMgr: sdfDatabase → '{inf.sdfDatabase.gameObject.name}'.");
+            }
+
+            // Wire SDFGridDatabase (exact trilinear grids) for LSTM v4 mode
+            if (inf.sdfGridDatabase == null)
+            {
+                inf.sdfGridDatabase = FindAny<SDFGridDatabase>();
+                if (inf.sdfGridDatabase != null)
+                    Log($"InfMgr: sdfGridDatabase → '{inf.sdfGridDatabase.gameObject.name}'.");
+                else
+                    Debug.LogWarning("[AutoWire] SDFGridDatabase not found — SDF local features will use bbox fallback.");
+            }
         }
 
         // ── HandSkeletonAnchor ────────────────────────────────────────────────
@@ -211,22 +237,38 @@ namespace AuraXR
 
             if (fa.leftControllerTransform == null)
             {
-                var lc = FindGoByNameAny("LeftHandAnchor", "LeftControllerAnchor",
-                                         "OVRLeftControllerVisual", "LeftHandTransform",
-                                         "LeftControllerVisual");
+                var lc = FindTrackingAnchor(true);
                 if (lc != null) { fa.leftControllerTransform = lc.transform; Log($"FeatureAssembler: leftControllerTransform  → '{lc.name}'"); }
                 else Debug.LogWarning("[AutoWire] FeatureAssembler: left controller anchor not found — assign leftControllerTransform manually.");
+            }
+            else if (IsProbablyControllerVisual(fa.leftControllerTransform))
+            {
+                var lc = FindTrackingAnchor(true);
+                if (lc != null && lc.transform != fa.leftControllerTransform)
+                {
+                    WarnVisualAssigned("FeatureAssembler.leftControllerTransform", fa.leftControllerTransform);
+                    fa.leftControllerTransform = lc.transform;
+                    Log($"FeatureAssembler: leftControllerTransform corrected → '{lc.name}'");
+                }
             }
             else
                 Log("FeatureAssembler: leftControllerTransform already assigned — skipped.");
 
             if (fa.rightControllerTransform == null)
             {
-                var rc = FindGoByNameAny("RightHandAnchor", "RightControllerAnchor",
-                                          "OVRRightControllerVisual", "RightHandTransform",
-                                          "RightControllerVisual");
+                var rc = FindTrackingAnchor(false);
                 if (rc != null) { fa.rightControllerTransform = rc.transform; Log($"FeatureAssembler: rightControllerTransform → '{rc.name}'"); }
                 else Debug.LogWarning("[AutoWire] FeatureAssembler: right controller anchor not found — assign rightControllerTransform manually.");
+            }
+            else if (IsProbablyControllerVisual(fa.rightControllerTransform))
+            {
+                var rc = FindTrackingAnchor(false);
+                if (rc != null && rc.transform != fa.rightControllerTransform)
+                {
+                    WarnVisualAssigned("FeatureAssembler.rightControllerTransform", fa.rightControllerTransform);
+                    fa.rightControllerTransform = rc.transform;
+                    Log($"FeatureAssembler: rightControllerTransform corrected → '{rc.name}'");
+                }
             }
             else
                 Log("FeatureAssembler: rightControllerTransform already assigned — skipped.");
@@ -288,6 +330,100 @@ namespace AuraXR
             }
         }
 
+        // ── HandRigController ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// Wires HandRigController.inferenceManager on both hand rigs so finger
+        /// angles are driven every frame. Without this the fingers never move.
+        /// </summary>
+        private void WireHandRigControllers()
+        {
+            var inf = FindAny<AuraXRInferenceManager>();
+            if (inf == null) { Log("HandRigControllers: AuraXRInferenceManager not found — skipped."); return; }
+
+            foreach (var rig in Object.FindObjectsByType<HandRigController>(FindObjectsInactive.Exclude))
+            {
+                if (rig.inferenceManager != null) { Log($"HandRigController on '{rig.gameObject.name}' already wired — skipped."); continue; }
+                rig.inferenceManager = inf;
+                Log($"HandRigController '{rig.gameObject.name}' → inferenceManager wired.");
+            }
+        }
+
+        // ── AuraXRInferenceManager virtual hand anchors ───────────────────────
+
+        /// <summary>
+        /// Wires AuraXRInferenceManager.virtualHandLeft and virtualHandRight to the
+        /// hand rig root transforms. Without these the wrist position is never updated.
+        /// </summary>
+        private void WireInferenceManagerVirtualHands()
+        {
+            var inf = FindAny<AuraXRInferenceManager>();
+            if (inf == null) { Log("VirtualHands: AuraXRInferenceManager not found — skipped."); return; }
+
+            if (inf.virtualHandLeft == null)
+            {
+                var go = FindGoByNameAny("LeftHandRig", "OVRCustomHandPrefab_L");
+                if (go != null) { inf.virtualHandLeft = go.transform; Log($"InfMgr: virtualHandLeft → '{go.name}'"); }
+                else Debug.LogWarning("[AutoWire] VirtualHands: LeftHandRig not found — assign virtualHandLeft manually.");
+            }
+            else Log("InfMgr: virtualHandLeft already assigned — skipped.");
+
+            if (inf.virtualHandRight == null)
+            {
+                var go = FindGoByNameAny("RightHandRig", "OVRCustomHandPrefab_R");
+                if (go != null) { inf.virtualHandRight = go.transform; Log($"InfMgr: virtualHandRight → '{go.name}'"); }
+                else Debug.LogWarning("[AutoWire] VirtualHands: RightHandRig not found — assign virtualHandRight manually.");
+            }
+            else Log("InfMgr: virtualHandRight already assigned — skipped.");
+        }
+
+        // ── IKRefinement ──────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Adds IKRefinement to each HandRigController GameObject (so it can run AFTER
+        /// HandRigController in LateUpdate). Wires the rigController + featureAssembler refs.
+        /// </summary>
+        private void WireIKRefinement()
+        {
+            var fa = FindAny<AuraXRFeatureAssembler>();
+            foreach (var rig in Object.FindObjectsByType<HandRigController>(FindObjectsInactive.Exclude))
+            {
+                var ik = rig.GetComponent<IKRefinement>();
+                if (ik == null)
+                {
+                    ik = rig.gameObject.AddComponent<IKRefinement>();
+                    Log($"Added IKRefinement to '{rig.gameObject.name}'.");
+                }
+                if (ik.rigController == null)    ik.rigController    = rig;
+                if (ik.featureAssembler == null) ik.featureAssembler = fa;
+                Log($"IKRefinement on '{rig.gameObject.name}' wired (enableIK={ik.enableIK}).");
+            }
+        }
+
+        // ── Object Colliders ──────────────────────────────────────────────────
+
+        /// <summary>
+        /// Walks every InteractableObject in the scene and ensures it has at least one
+        /// Collider so ProximityDetector + IKRefinement can detect it. If a MeshRenderer
+        /// exists but no Collider, adds a MeshCollider (convex) for low cost.
+        /// </summary>
+        private void EnsureObjectColliders()
+        {
+            int added = 0;
+            foreach (var io in Object.FindObjectsByType<InteractableObject>(FindObjectsInactive.Exclude))
+            {
+                if (io.GetComponentInChildren<Collider>() != null) continue;
+                var mf = io.GetComponentInChildren<MeshFilter>();
+                if (mf == null) continue;
+                var mc = mf.gameObject.AddComponent<MeshCollider>();
+                mc.convex = true;
+                mc.isTrigger = false;
+                added++;
+                Log($"Added convex MeshCollider to '{io.name}'.");
+            }
+            if (added > 0) Log($"EnsureObjectColliders: added {added} colliders.");
+        }
+
         // ── Helpers ───────────────────────────────────────────────────────────
 
         private static T FindAny<T>() where T : Component =>
@@ -301,6 +437,26 @@ namespace AuraXR
                 if (go != null) return go;
             }
             return null;
+        }
+
+        private static GameObject FindTrackingAnchor(bool left)
+        {
+            return left
+                ? FindGoByNameAny("LeftHandAnchor", "LeftControllerAnchor", "LeftHandTransform")
+                : FindGoByNameAny("RightHandAnchor", "RightControllerAnchor", "RightHandTransform");
+        }
+
+        private static bool IsProbablyControllerVisual(Transform t)
+        {
+            if (t == null) return false;
+            string n = t.name.ToLowerInvariant();
+            return n.Contains("visual") || n.Contains("model") || n.Contains("mesh");
+        }
+
+        private static void WarnVisualAssigned(string field, Transform t)
+        {
+            Debug.LogWarning($"[AutoWire] {field} is assigned to '{t.name}', which looks like a controller visual. " +
+                             "For 1:1 virtual-hand alignment, assign the tracking anchor instead (LeftHandAnchor / RightHandAnchor).");
         }
 
         private static void Log(string msg) =>

@@ -1,0 +1,205 @@
+"""Minimum HOT3D temporal dataset sanity audit.
+
+This script implements M1 from docs/plan/NOW_ROADMAP.md. It does not rebuild
+datasets; it checks whether existing temporal HDF5 files are safe enough for
+the E0-E4 experience-debug path.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from collections import Counter, defaultdict
+from pathlib import Path
+from typing import Any
+
+import h5py
+import numpy as np
+
+
+def _percentiles(values: np.ndarray, ps=(5, 25, 50, 75, 95)) -> dict[str, float]:
+    if values.size == 0:
+        return {f"p{p}": float("nan") for p in ps}
+    qs = np.percentile(values.astype(np.float64), ps)
+    return {f"p{p}": float(q) for p, q in zip(ps, qs)}
+
+
+def _split_audit(g: h5py.Group) -> dict[str, Any]:
+    seq = g["sequence_id"][:]
+    frame = g["frame_index"][:]
+    mirror = g["is_mirror"][:] if "is_mirror" in g else np.zeros_like(seq, dtype=np.uint8)
+    obj = g["obj_id"][:]
+    dist = g["distances"][:]
+    contact_field = "contact_v2" if "contact_v2" in g else "contact"
+    contact = g[contact_field][:] if contact_field in g else np.zeros_like(seq, dtype=np.uint8)
+
+    stream_to_frames: dict[tuple[int, int], list[int]] = defaultdict(list)
+    seq_to_mirror_values: dict[int, set[int]] = defaultdict(set)
+    duplicate_stream_frames = 0
+    object_switches = 0
+    object_switch_sequences = 0
+
+    for i, (sid, mid, fidx) in enumerate(zip(seq, mirror, frame)):
+        key = (int(sid), int(mid))
+        stream_to_frames[key].append(int(fidx))
+        seq_to_mirror_values[int(sid)].add(int(mid))
+
+    for key, frames in stream_to_frames.items():
+        counts = Counter(frames)
+        duplicate_stream_frames += sum(c - 1 for c in counts.values() if c > 1)
+
+    # Older broken datasets have both real and mirror under the same seq_id.
+    mixed_sequence_ids = sorted(
+        sid for sid, mids in seq_to_mirror_values.items() if len(mids) > 1
+    )
+
+    for key in stream_to_frames:
+        idxs = np.where((seq == key[0]) & (mirror == key[1]))[0]
+        idxs = idxs[np.argsort(frame[idxs])]
+        if len(idxs) > 1:
+            switches = int(np.sum(obj[idxs][1:] != obj[idxs][:-1]))
+            object_switches += switches
+            object_switch_sequences += int(switches > 0)
+
+    per_object = {str(int(k)): int(v) for k, v in Counter(obj.astype(int)).most_common()}
+
+    return {
+        "frame_count": int(len(seq)),
+        "stream_count_sequence_id_plus_is_mirror": int(len(stream_to_frames)),
+        "raw_sequence_id_count": int(len(seq_to_mirror_values)),
+        "real_frame_count": int(np.sum(mirror == 0)),
+        "mirror_frame_count": int(np.sum(mirror == 1)),
+        "mixed_real_mirror_sequence_id_count": int(len(mixed_sequence_ids)),
+        "mixed_real_mirror_sequence_id_examples": mixed_sequence_ids[:10],
+        "duplicate_frame_index_within_stream_count": int(duplicate_stream_frames),
+        "contact_rate": float(np.mean(contact.astype(bool))) if len(contact) else 0.0,
+        "contact_field": contact_field if contact_field in g else "missing",
+        "distance_m": _percentiles(dist),
+        "object_count": int(len(set(obj.astype(int).tolist()))),
+        "per_object_frame_count": per_object,
+        "object_switch_count": int(object_switches),
+        "object_switch_stream_count": int(object_switch_sequences),
+    }
+
+
+def audit_dataset(h5_path: Path) -> dict[str, Any]:
+    with h5py.File(h5_path, "r") as hf:
+        meta = json.loads(hf.attrs.get("meta", "{}"))
+        splits = {split: _split_audit(hf[split]) for split in hf.keys() if isinstance(hf[split], h5py.Group)}
+
+    train = splits.get("train", {})
+    val = splits.get("val", {})
+
+    checks = {
+        "has_train_and_val": "train" in splits and "val" in splits,
+        "norm_stats_train_real_only": meta.get("norm_stats_source") == "train_real_only",
+        "no_mixed_real_mirror_sequence_ids_train": train.get("mixed_real_mirror_sequence_id_count", 0) == 0,
+        "no_mixed_real_mirror_sequence_ids_val": val.get("mixed_real_mirror_sequence_id_count", 0) == 0,
+        "no_duplicate_frame_index_within_stream_train": train.get("duplicate_frame_index_within_stream_count", 0) == 0,
+        "no_duplicate_frame_index_within_stream_val": val.get("duplicate_frame_index_within_stream_count", 0) == 0,
+        "contact_rate_at_least_3pct_train": train.get("contact_rate", 0.0) >= 0.03,
+        "frame_level_object_ids_present": train.get("object_count", 0) > 0 and val.get("object_count", 0) > 0,
+    }
+
+    return {
+        "path": str(h5_path),
+        "meta_version": meta.get("architecture", {}).get("version"),
+        "norm_stats_source": meta.get("norm_stats_source", "missing_or_legacy"),
+        "splits": splits,
+        "checks": checks,
+        "passed": bool(all(checks.values())),
+    }
+
+
+def _report(results: list[dict[str, Any]]) -> str:
+    lines = [
+        "# HOT3D Minimum Sanity Report",
+        "",
+        "Generated by `src/audit_hot3d_minimum_sanity.py`.",
+        "",
+        "## Summary",
+        "",
+        "| Dataset | Passed | Train contact | Train mixed seq | Val mixed seq | Norm source |",
+        "|---|---:|---:|---:|---:|---|",
+    ]
+    for r in results:
+        train = r["splits"].get("train", {})
+        val = r["splits"].get("val", {})
+        lines.append(
+            "| {path} | {passed} | {contact:.2%} | {tmix} | {vmix} | {norm} |".format(
+                path=r["path"],
+                passed="yes" if r["passed"] else "no",
+                contact=train.get("contact_rate", 0.0),
+                tmix=train.get("mixed_real_mirror_sequence_id_count", 0),
+                vmix=val.get("mixed_real_mirror_sequence_id_count", 0),
+                norm=r.get("norm_stats_source", ""),
+            )
+        )
+
+    lines.extend(["", "## Failed Checks", ""])
+    any_failed = False
+    for r in results:
+        failed = [name for name, ok in r["checks"].items() if not ok]
+        if not failed:
+            continue
+        any_failed = True
+        lines.append(f"### {r['path']}")
+        lines.extend([f"- `{name}`" for name in failed])
+        lines.append("")
+    if not any_failed:
+        lines.append("All checks passed.")
+
+    lines.extend(["", "## Next Action", ""])
+    if all(r["passed"] for r in results):
+        lines.append("M1 passes. Continue with M2 E0/E1 replay.")
+    else:
+        lines.append("M1 does not pass yet. Rebuild temporal datasets with the fixed builder, then rerun this audit.")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser()
+    p.add_argument(
+        "--datasets",
+        nargs="+",
+        type=Path,
+        default=[
+            Path("data/left_temporal/dataset_temporal.h5"),
+            Path("data/right_temporal/dataset_temporal.h5"),
+        ],
+    )
+    p.add_argument("--report", type=Path, default=Path("reports/hot3d_minimum_sanity.md"))
+    p.add_argument("--write-audit-json", action="store_true")
+    return p.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    results = []
+    for path in args.datasets:
+        if not path.exists():
+            results.append({
+                "path": str(path),
+                "splits": {},
+                "checks": {"exists": False},
+                "passed": False,
+                "norm_stats_source": "missing",
+            })
+            continue
+        audit = audit_dataset(path)
+        results.append(audit)
+        if args.write_audit_json:
+            out = path.parent / "audit.json"
+            out.write_text(json.dumps(audit, indent=2))
+
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_text(_report(results))
+
+    print(args.report)
+    for r in results:
+        print(f"{r['path']}: {'PASS' if r['passed'] else 'FAIL'}")
+
+
+if __name__ == "__main__":
+    main()

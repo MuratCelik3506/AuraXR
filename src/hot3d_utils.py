@@ -228,6 +228,93 @@ def wrist_rot_to_6d(q_wrist_hot3d_wxyz: np.ndarray, direction_hot3d: np.ndarray)
 
 
 # ---------------------------------------------------------------------------
+# Mirror augmentation helpers — core contribution of AuraXR v2
+# ---------------------------------------------------------------------------
+
+# Abduction joint indices in the 22-dim UMeTrack joint_angles vector.
+# These joints change sign under left↔right mirror (x-axis flip).
+#   Thumb [0-3]:  CMC-flex, abduction*, MCP, DIP
+#   Index [4-7]:  abduction*, MCP, PIP, DIP
+#   Middle [8-11]: abduction*, MCP, PIP, DIP
+#   Ring [12-15]: abduction*, MCP, PIP, DIP
+#   Pinky [16-19]: abduction*, MCP, PIP, DIP
+ABDUCTION_JOINT_INDICES = [1, 4, 8, 12, 16]
+
+# Feature layout v3 (25 dims) — see TECHNICAL_REPORT.md §Feature v3.
+# Indices, semantics, and mirror behaviour (x-axis world flip):
+#   [0-2]   dir_world           — direction wrist→object, HOT3D world, mask [-1, 1, 1]
+#   [3-5]   dir_obj_local       — same vector rotated into object's local frame, mask [-1, 1, 1]
+#   [6]     dist                — wrist→object distance (m), unchanged
+#   [7]     approach_speed      — scalar projection of wrist velocity on dir_world, unchanged
+#                                 (both vectors flip x under mirror so the dot product survives)
+#   [8-10]  obj_vel_world       — nearest object's linear velocity in HOT3D world, mask [-1, 1, 1]
+#   [11-16] wrist_rot_6d_input  — wrist rotation in Unity frame, canonical-relative.
+#                                 Same encoding as the wrist_rot_6d TARGET (see wrist_rot_to_6d),
+#                                 so the existing WRIST_ROT_MIRROR_MASK applies: [-1,1,1,-1,1,1]
+#   [17]    hand_confidence     — UMeTrack tracker self-confidence (∈ [0,1]), unchanged
+#   [18-21] grip_oh             — Power/Precision/Palmar/Pinch one-hot, unchanged
+#   [22-24] bbox                — object bbox half-extents (m), unchanged
+FEATURE_MIRROR_MASK = np.array(
+    [
+        -1,  1,  1,        # dir_world
+        -1,  1,  1,        # dir_obj_local
+         1,                # dist
+         1,                # approach_speed
+        -1,  1,  1,        # obj_vel_world
+        -1,  1,  1, -1, 1, 1,  # wrist_rot_6d_input (matches WRIST_ROT_MIRROR_MASK)
+         1,                # hand_confidence
+         1,  1,  1,  1,    # grip_oh
+         1,  1,  1,        # bbox
+    ],
+    dtype=np.float32,
+)
+assert FEATURE_MIRROR_MASK.shape == (25,), FEATURE_MIRROR_MASK.shape
+
+# Wrist rotation 6D = [col0(3), col1(3)] of rotation matrix (canonical-relative, Unity frame).
+# The same mask is reused for the wrist_rot_6d slice of the input feature (indices [11-16]).
+WRIST_ROT_MIRROR_MASK = np.array([-1, 1, 1, -1, 1, 1], dtype=np.float32)
+
+# Index slices into the 25-dim feature vector (used by build_dataset, train, evaluate, Unity).
+FEATURE_DIM         = 25
+F_IDX_DIR_WORLD     = slice(0, 3)
+F_IDX_DIR_OBJ_LOC   = slice(3, 6)
+F_IDX_DIST          = 6
+F_IDX_APPROACH_SPD  = 7
+F_IDX_OBJ_VEL       = slice(8, 11)
+F_IDX_WRIST_ROT     = slice(11, 17)
+F_IDX_CONFIDENCE    = 17
+F_IDX_GRIP_OH       = slice(18, 22)
+F_IDX_BBOX          = slice(22, 25)
+
+
+def mirror_feature(f: np.ndarray) -> np.ndarray:
+    """Mirror a 15-dim feature vector (left↔right hand flip via x-axis negation).
+
+    Converts a left-hand feature to an equivalent right-hand feature (or vice versa)
+    by negating the x-components of the world-frame and object-local direction vectors.
+    Scalar features (dist, approach_speed, grip_oh, bbox) are unchanged.
+    """
+    return (f * FEATURE_MIRROR_MASK).astype(np.float32)
+
+
+def mirror_joints(angles: np.ndarray) -> np.ndarray:
+    """Mirror UMeTrack 22-dim joint angles (left↔right hand symmetry).
+
+    Abduction joints change sign; flexion joints are unchanged.
+    Joints 20-21 are always 0 (placeholder), unaffected.
+    """
+    out = angles.copy()
+    for j in ABDUCTION_JOINT_INDICES:
+        out[j] = -out[j]
+    return out.astype(np.float32)
+
+
+def mirror_wrist_rot(rot6d: np.ndarray) -> np.ndarray:
+    """Mirror 6D wrist rotation (left↔right hand via x-axis negation of column vectors)."""
+    return (rot6d * WRIST_ROT_MIRROR_MASK).astype(np.float32)
+
+
+# ---------------------------------------------------------------------------
 # Sequence discovery
 # ---------------------------------------------------------------------------
 
@@ -247,11 +334,13 @@ def find_sequences(data_dir: Path, split: str = "train") -> list[Path]:
 def zip_paths(seq_dir: Path) -> tuple[Path | None, Path | None]:
     """Return (hand_data_zip, ground_truth_zip) for a sequence directory.
 
+    Supports both Quest3 (Hot3DQuest_v4.0.0_) and Aria (Hot3DAria_v4.0.0_) sequences.
     Returns (None, None) if either file is missing.
     """
     seq_id = seq_dir.name
-    hand_zip = seq_dir / f"Hot3DQuest_v4.0.0_{seq_id}_hand_data.zip"
-    gt_zip   = seq_dir / f"Hot3DQuest_v4.0.0_{seq_id}_ground_truth.zip"
-    if not hand_zip.exists() or not gt_zip.exists():
-        return None, None
-    return hand_zip, gt_zip
+    for prefix in ("Hot3DQuest_v4.0.0_", "Hot3DAria_v4.0.0_"):
+        hand_zip = seq_dir / f"{prefix}{seq_id}_hand_data.zip"
+        gt_zip   = seq_dir / f"{prefix}{seq_id}_ground_truth.zip"
+        if hand_zip.exists() and gt_zip.exists():
+            return hand_zip, gt_zip
+    return None, None
