@@ -67,6 +67,7 @@ from sdf_utils import SDFDatabase, SDF_FEATURE_DIM
 assert FEATURE_DIM == 25
 
 CONTACT_DIST_M    = 0.10  # 10 cm wrist-to-object-center
+CONTACT_V2_DIST_M = 0.12  # slightly wider proxy; train_lstm.py prefers this if present
 MANO_POSE_DIM     = 15    # MANO PCA components (HOT3D stores 15)
 MANO_BETAS_DIM    = 10    # MANO shape parameters
 TOTAL_FEATURE_DIM = FEATURE_DIM + SDF_FEATURE_DIM   # 29
@@ -120,6 +121,40 @@ def mirror_mano_pose(pose: np.ndarray, mask: np.ndarray) -> np.ndarray:
     return pose * mask
 
 
+def parse_yaw_aug(value: str | None) -> list[float]:
+    if not value:
+        return []
+    return [float(x.strip()) for x in value.split(",") if x.strip()]
+
+
+def yaw_matrix(deg: float) -> np.ndarray:
+    theta = np.deg2rad(deg)
+    c, s = np.cos(theta), np.sin(theta)
+    return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]], dtype=np.float32)
+
+
+def yaw_augment_sequence(frames: list[dict], yaw_deg: float, seq_id: int) -> list[dict]:
+    """Rotate world-frame features around HOT3D world-up.
+
+    Object-local direction and canonical-relative wrist 6D remain unchanged under
+    a rigid global yaw of both wrist and object frames.
+    """
+    ry = yaw_matrix(yaw_deg)
+    out = []
+    for f in frames:
+        feat = f["feature"].copy()
+        feat[0:3] = ry @ feat[0:3]
+        feat[8:11] = ry @ feat[8:11]
+        out.append({
+            **f,
+            "feature": feat.astype(np.float32),
+            "seq_id": np.int32(seq_id),
+            "is_mirror": np.uint8(2),
+            "augmentation": f"yaw_{yaw_deg:g}",
+        })
+    return out
+
+
 # ── Frame extraction ──────────────────────────────────────────────────────────
 
 def extract_sequence_frames(
@@ -128,6 +163,7 @@ def extract_sequence_frames(
     seq_id: int,
     sdf_db: SDFDatabase | None,
     mirror_mask: np.ndarray,
+    add_wrist_obj_pos: bool = False,
 ) -> list[dict]:
     """Extract frames from one sequence in temporal order.
 
@@ -218,9 +254,10 @@ def extract_sequence_frames(
                 approach_spd = float(np.dot(vel_world, direction))
                 obj_vel      = cur_obj_vel.get(bop_id, np.zeros(3, np.float32))
                 wrist_rot_in = wrist_rot_to_6d(wrist_q_wxyz, direction)
+                wrist_in_obj = rotate_vec(q_obj_inv, wrist_pos - obj["pos_world"])
                 grip_oh, bbox = object_features(bop_id)
                 # hand_confidence slot (dim 17) → set to 1.0 (MANO traj has no conf)
-                best_core = np.concatenate([
+                parts = [
                     direction,       # [0-2]
                     dir_obj_loc,     # [3-5]
                     [dist],          # [6]
@@ -230,7 +267,10 @@ def extract_sequence_frames(
                     [1.0],           # [17] hand_confidence placeholder
                     grip_oh,         # [18-21]
                     bbox,            # [22-24]
-                ]).astype(np.float32)
+                ]
+                if add_wrist_obj_pos:
+                    parts.append(wrist_in_obj)  # [25-27]
+                best_core = np.concatenate(parts).astype(np.float32)
                 best_dir     = direction
                 best_bop_id  = bop_id
                 best_obj_q   = obj["quat_world"]
@@ -261,6 +301,7 @@ def extract_sequence_frames(
             "frame_index":  np.int32(frame_idx),
             "is_mirror":    np.uint8(0),
             "contact":      np.uint8(min_dist < CONTACT_DIST_M),
+            "contact_v2":   np.uint8(min_dist < CONTACT_V2_DIST_M),
         })
         frame_idx += 1
 
@@ -281,10 +322,28 @@ def mirror_sequence(frames: list[dict], mirrored_seq_id: int, mirror_mask: np.nd
         "frame_index":  f["frame_index"],
         "is_mirror":    np.uint8(1),
         "contact":      f["contact"],
+        "contact_v2":   f["contact_v2"],
     } for f in frames]
 
 
 # ── Normalisation stats ────────────────────────────────────────────────────────
+
+def feature_names(feature_dim: int) -> list[str]:
+    names = [
+        "dir_world_x", "dir_world_y", "dir_world_z",
+        "dir_obj_local_x", "dir_obj_local_y", "dir_obj_local_z",
+        "distance", "approach_speed",
+        "obj_vel_x", "obj_vel_y", "obj_vel_z",
+        "wrist_rot6d_0", "wrist_rot6d_1", "wrist_rot6d_2",
+        "wrist_rot6d_3", "wrist_rot6d_4", "wrist_rot6d_5",
+        "hand_confidence",
+        "grip_power", "grip_precision", "grip_palmar", "grip_pinch",
+        "bbox_x", "bbox_y", "bbox_z",
+    ]
+    if feature_dim == FEATURE_DIM + 3:
+        names += ["wrist_obj_x", "wrist_obj_y", "wrist_obj_z"]
+    return names
+
 
 def compute_norm_stats(train_frames: list[dict]) -> dict:
     """Compute z-score stats from train-real frames only."""
@@ -297,25 +356,30 @@ def compute_norm_stats(train_frames: list[dict]) -> dict:
         s = np.where(s < 1e-8, 1.0, s)
         return m.tolist(), s.tolist()
 
-    feat_mean,  feat_std  = stats(np.stack([f["feature"]      for f in real]))
+    feature_arr = np.stack([f["feature"] for f in real])
+    feat_mean,  feat_std  = stats(feature_arr)
     sdf_mean,   sdf_std   = stats(np.stack([f["sdf_feature"]  for f in real]))
     tgt_mean,   tgt_std   = stats(np.stack([f["target"]       for f in real]))
     rot_mean,   rot_std   = stats(np.stack([f["wrist_rot_6d"] for f in real]))
 
+    feature_dim = int(feature_arr.shape[1])
+    total_input_dim = feature_dim + SDF_FEATURE_DIM
     return {
         "feature_mean":   feat_mean,  "feature_std":   feat_std,
         "sdf_mean":       sdf_mean,   "sdf_std":       sdf_std,
         "target_mean":    tgt_mean,   "target_std":    tgt_std,
         "wrist_rot_mean": rot_mean,   "wrist_rot_std": rot_std,
         "architecture": {
-            "input_dim":       FEATURE_DIM,
+            "input_dim":       feature_dim,
             "sdf_input_dim":   SDF_FEATURE_DIM,
-            "total_input_dim": TOTAL_FEATURE_DIM,
+            "total_input_dim": total_input_dim,
             "output_dim":      MANO_POSE_DIM,   # 15 (changed from 22)
             "output_type":     "mano_pca",
             "mano_pose_dim":   MANO_POSE_DIM,
-            "version":         5,               # MANO version
+            "version":         6 if feature_dim > FEATURE_DIM else 5,
         },
+        "feature_names": feature_names(feature_dim),
+        "feature_version": "mano_v6_wrist_obj" if feature_dim > FEATURE_DIM else "mano_v5",
         "norm_stats_source": "train_real_only",
     }
 
@@ -350,6 +414,7 @@ def write_hdf5(output_path: Path, train_frames: list[dict], val_frames: list[dic
             g.create_dataset("frame_index",  data=np.array([f["frame_index"]   for f in frames], np.int32),  **kw)
             g.create_dataset("is_mirror",    data=np.array([f["is_mirror"]     for f in frames], np.uint8),  **kw)
             g.create_dataset("contact",      data=np.array([f["contact"]       for f in frames], np.uint8),  **kw)
+            g.create_dataset("contact_v2",   data=np.array([f["contact_v2"]    for f in frames], np.uint8),  **kw)
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
@@ -365,6 +430,10 @@ def parse_args():
     p.add_argument("--mirror_mask", default=None, type=Path,
                    help="JSON file with mirror_mask array (15,). Auto-approximated if absent.")
     p.add_argument("--sdf_dir",     default="data/models/sdf_grids", type=Path)
+    p.add_argument("--add_wrist_obj_pos", action="store_true",
+                   help="Append wrist position in object coordinates to core features (+3 dims).")
+    p.add_argument("--yaw_aug", default="", type=str,
+                   help="Comma-separated train-only global yaw augmentations in degrees, e.g. '45,-45,90,-90'.")
     p.add_argument("--dry_run",     action="store_true",
                    help="Parse first 5 sequences only, print stats, do not write HDF5.")
     return p.parse_args()
@@ -375,7 +444,9 @@ def main():
     hand_key     = HAND_KEY[args.hand]
     mirror_mask  = _load_mirror_mask(args.mirror_mask)
     mirror_label = "OFF" if args.no_mirror else f"ON (mask={mirror_mask.tolist()})"
-    print(f"build_dataset_mano: hand={args.hand}  mirror={mirror_label}")
+    yaw_angles = parse_yaw_aug(args.yaw_aug)
+    print(f"build_dataset_mano: hand={args.hand}  mirror={mirror_label} "
+          f"wrist_obj={args.add_wrist_obj_pos} yaw_aug={yaw_angles}")
 
     # SDF database
     sdf_db = None
@@ -413,7 +484,9 @@ def main():
     skipped = 0
 
     for seq_id, seq_dir in enumerate(tqdm(sequences, desc="Sequences")):
-        frames = extract_sequence_frames(seq_dir, hand_key, seq_id, sdf_db, mirror_mask)
+        frames = extract_sequence_frames(
+            seq_dir, hand_key, seq_id, sdf_db, mirror_mask,
+            add_wrist_obj_pos=args.add_wrist_obj_pos)
         if not frames:
             skipped += 1
             continue
@@ -425,6 +498,10 @@ def main():
             train_seqs.append(frames)
             if not args.no_mirror:
                 train_seqs.append(mirror_sequence(frames, seq_id + len(sequences), mirror_mask))
+            next_aug_seq_id = seq_id + 2 * len(sequences)
+            for yaw in yaw_angles:
+                train_seqs.append(yaw_augment_sequence(frames, yaw, next_aug_seq_id))
+                next_aug_seq_id += len(sequences)
 
     rng_tr = random.Random(args.seed + 1)
     rng_tr.shuffle(train_seqs)
@@ -443,6 +520,13 @@ def main():
         return
 
     meta = compute_norm_stats(train_frames)
+    meta["feature_dim"] = meta["architecture"]["input_dim"]
+    meta["augmentation_flags"] = {
+        "mirror": not args.no_mirror,
+        "yaw_angles_deg": yaw_angles,
+        "add_wrist_obj_pos": args.add_wrist_obj_pos,
+    }
+    meta["normalization_policy"] = "mean_std_train_real_only"
     out  = args.output_dir / "dataset_mano.h5"
     print(f"\nWriting {out} …")
     write_hdf5(out, train_frames, val_frames, meta)

@@ -26,10 +26,12 @@ class SDFLSTMModel(nn.Module):
         hidden_size: int = 256,
         num_layers: int = 2,
         dropout: float = 0.25,
+        orientation_aware_sdf: bool = False,
     ):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
+        self.orientation_aware_sdf = orientation_aware_sdf
 
         self.feat_proj = nn.Sequential(
             nn.Linear(feat_dim, proj_dim),
@@ -37,7 +39,7 @@ class SDFLSTMModel(nn.Module):
             nn.ReLU(),
         )
         self.obj_inj = nn.Sequential(
-            nn.Linear(proj_dim + embed_dim, proj_dim),
+            nn.Linear(proj_dim + embed_dim + (3 if orientation_aware_sdf else 0), proj_dim),
             nn.LayerNorm(proj_dim),
             nn.ReLU(),
         )
@@ -67,7 +69,10 @@ class SDFLSTMModel(nn.Module):
 
     def _prepare_step(self, frame_feat: torch.Tensor, obj_embed: torch.Tensor) -> torch.Tensor:
         frame = self.feat_proj(frame_feat)
-        combined = torch.cat([frame, obj_embed], dim=-1)
+        parts = [frame, obj_embed]
+        if self.orientation_aware_sdf:
+            parts.append(torch.nn.functional.normalize(frame_feat[..., 3:6], dim=-1, eps=1e-6))
+        combined = torch.cat(parts, dim=-1)
         return self.obj_inj(combined)
 
     def forward_sequence(
@@ -89,7 +94,10 @@ class SDFLSTMModel(nn.Module):
         _, T, _ = feat_seq.shape
         frame = self.feat_proj(feat_seq)
         emb = obj_embed.unsqueeze(1).expand(-1, T, -1)
-        lstm_in = self.obj_inj(torch.cat([frame, emb], dim=-1))
+        parts = [frame, emb]
+        if self.orientation_aware_sdf:
+            parts.append(torch.nn.functional.normalize(feat_seq[..., 3:6], dim=-1, eps=1e-6))
+        lstm_in = self.obj_inj(torch.cat(parts, dim=-1))
         h_out, _ = self.lstm(lstm_in)
         return (
             self.pose_head(h_out),

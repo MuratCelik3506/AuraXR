@@ -96,7 +96,39 @@ def parse_args():
                    help="Disable mirror augmentation.")
     p.add_argument("--sdf_dir",     default="data/models/sdf_grids", type=Path,
                    help="Directory with pre-computed SDF grids (bop##.npz).")
+    p.add_argument("--add_wrist_obj_pos", action="store_true",
+                   help="Append wrist position in object coordinates to core features (+3 dims).")
+    p.add_argument("--yaw_aug", default="", type=str,
+                   help="Comma-separated train-only global yaw augmentations in degrees, e.g. '45,-45,90,-90'.")
     return p.parse_args()
+
+
+def parse_yaw_aug(value: str | None) -> list[float]:
+    if not value:
+        return []
+    return [float(x.strip()) for x in value.split(",") if x.strip()]
+
+
+def yaw_matrix(deg: float) -> np.ndarray:
+    theta = np.deg2rad(deg)
+    c, s = np.cos(theta), np.sin(theta)
+    return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]], dtype=np.float32)
+
+
+def yaw_augment_sequence(frames: list[dict], yaw_deg: float, seq_id: int) -> list[dict]:
+    ry = yaw_matrix(yaw_deg)
+    out = []
+    for f in frames:
+        feat = f["feature"].copy()
+        feat[0:3] = ry @ feat[0:3]
+        feat[8:11] = ry @ feat[8:11]
+        out.append({
+            **f,
+            "feature": feat.astype(np.float32),
+            "seq_id": np.int32(seq_id),
+            "is_mirror": np.uint8(2),
+        })
+    return out
 
 
 def extract_sequence_frames(
@@ -104,6 +136,7 @@ def extract_sequence_frames(
     hand_key: str,
     seq_id: int,
     sdf_db: SDFDatabase,
+    add_wrist_obj_pos: bool = False,
 ) -> list[dict]:
     """Extract frames from one sequence in TEMPORAL ORDER.
 
@@ -203,8 +236,9 @@ def extract_sequence_frames(
                 approach_spd  = float(np.dot(vel_world, direction))
                 obj_vel       = cur_obj_vel.get(bop_id, np.zeros(3, dtype=np.float32))
                 wrist_rot_in  = wrist_rot_to_6d(wrist_q_wxyz, direction)
+                wrist_in_obj  = rotate_vec(q_obj_inv, wrist_pos - obj["pos_world"])
                 grip_oh, bbox = object_features(bop_id)
-                best_core = np.concatenate([
+                parts = [
                     direction,        # [0-2]
                     dir_obj_loc,      # [3-5]
                     [dist],           # [6]
@@ -214,7 +248,10 @@ def extract_sequence_frames(
                     [hand_conf],      # [17]
                     grip_oh,          # [18-21]
                     bbox,             # [22-24]
-                ]).astype(np.float32)
+                ]
+                if add_wrist_obj_pos:
+                    parts.append(wrist_in_obj)  # [25-27]
+                best_core = np.concatenate(parts).astype(np.float32)
                 best_dir     = direction
                 best_bop_id  = bop_id
                 best_obj_q   = obj["quat_world"]
@@ -272,6 +309,23 @@ def mirror_sequence(frames: list[dict], mirrored_seq_id: int | None = None) -> l
     return mirrored
 
 
+def feature_names(feature_dim: int) -> list[str]:
+    names = [
+        "dir_world_x", "dir_world_y", "dir_world_z",
+        "dir_obj_local_x", "dir_obj_local_y", "dir_obj_local_z",
+        "distance", "approach_speed",
+        "obj_vel_x", "obj_vel_y", "obj_vel_z",
+        "wrist_rot6d_0", "wrist_rot6d_1", "wrist_rot6d_2",
+        "wrist_rot6d_3", "wrist_rot6d_4", "wrist_rot6d_5",
+        "hand_confidence",
+        "grip_power", "grip_precision", "grip_palmar", "grip_pinch",
+        "bbox_x", "bbox_y", "bbox_z",
+    ]
+    if feature_dim == FEATURE_DIM + 3:
+        names += ["wrist_obj_x", "wrist_obj_y", "wrist_obj_z"]
+    return names
+
+
 def compute_norm_stats(train_frames: list[dict]) -> dict:
     """Compute normalization from train-real frames only.
 
@@ -296,6 +350,8 @@ def compute_norm_stats(train_frames: list[dict]) -> dict:
     tgt_mean,  tgt_std    = stats(targets)
     rot_mean,  rot_std    = stats(wrist_rots)
 
+    feature_dim = int(features.shape[1])
+    total_input_dim = feature_dim + SDF_FEATURE_DIM
     return {
         "feature_mean":     feat_mean,
         "feature_std":      feat_std,
@@ -306,12 +362,14 @@ def compute_norm_stats(train_frames: list[dict]) -> dict:
         "wrist_rot_mean":   rot_mean,
         "wrist_rot_std":    rot_std,
         "architecture": {
-            "input_dim":     FEATURE_DIM,
+            "input_dim":     feature_dim,
             "sdf_input_dim": SDF_FEATURE_DIM,
-            "total_input_dim": TOTAL_FEATURE_DIM,
+            "total_input_dim": total_input_dim,
             "output_dim":    22,
-            "version":       4,           # temporal version
+            "version":       6 if feature_dim > FEATURE_DIM else 4,
         },
+        "feature_names": feature_names(feature_dim),
+        "feature_version": "temporal_v6_wrist_obj" if feature_dim > FEATURE_DIM else "temporal_v4",
         "norm_stats_source": "train_real_only",
     }
 
@@ -349,7 +407,9 @@ def write_hdf5(output_path: Path, train_frames: list, val_frames: list, meta: di
 def main():
     args = parse_args()
     hand_key = HAND_KEY[args.hand]
-    print(f"build_dataset_temporal: hand={args.hand}  mirror={'OFF' if args.no_mirror else 'ON'}")
+    yaw_angles = parse_yaw_aug(args.yaw_aug)
+    print(f"build_dataset_temporal: hand={args.hand}  mirror={'OFF' if args.no_mirror else 'ON'} "
+          f"wrist_obj={args.add_wrist_obj_pos} yaw_aug={yaw_angles}")
 
     # Load SDF database if available
     sdf_db = None
@@ -383,7 +443,9 @@ def main():
     skipped = 0
 
     for seq_id, seq_dir in enumerate(tqdm(sequences, desc="Sequences")):
-        frames = extract_sequence_frames(seq_dir, hand_key, seq_id, sdf_db)
+        frames = extract_sequence_frames(
+            seq_dir, hand_key, seq_id, sdf_db,
+            add_wrist_obj_pos=args.add_wrist_obj_pos)
         if not frames:
             skipped += 1
             continue
@@ -395,6 +457,10 @@ def main():
             train_seqs.append(frames)
             if not args.no_mirror:
                 train_seqs.append(mirror_sequence(frames, mirrored_seq_id=seq_id + len(sequences)))
+            next_aug_seq_id = seq_id + 2 * len(sequences)
+            for yaw in yaw_angles:
+                train_seqs.append(yaw_augment_sequence(frames, yaw, next_aug_seq_id))
+                next_aug_seq_id += len(sequences)
 
     # Flatten to frame list — sequences in order, frames within each sequence in order
     # (sequences themselves are shuffled for diversity in mini-batches)
@@ -410,6 +476,13 @@ def main():
     print(f"  Contact_v2 proxy (dist<{CONTACT_V2_DIST_M*100:.0f}cm): {contact_v2_tr} ({100*contact_v2_tr/max(1,len(train_frames)):.1f}%)")
 
     meta = compute_norm_stats(train_frames)
+    meta["feature_dim"] = meta["architecture"]["input_dim"]
+    meta["augmentation_flags"] = {
+        "mirror": not args.no_mirror,
+        "yaw_angles_deg": yaw_angles,
+        "add_wrist_obj_pos": args.add_wrist_obj_pos,
+    }
+    meta["normalization_policy"] = "mean_std_train_real_only"
 
     out = args.output_dir / "dataset_temporal.h5"
     print(f"\nWriting {out} …")

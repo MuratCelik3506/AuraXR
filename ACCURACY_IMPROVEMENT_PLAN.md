@@ -3,44 +3,95 @@
 **Model:** `SDFLSTMModel` — 2-layer LSTM, hidden size 256, current input 29 dim, wrist rotation output 6D  
 **Training data:** HOT3D temporal windows (`T=16`) + optional ARCTIC/DexYCB contact augmentation  
 **Main problem:** train/inference domain gap, wrist rotation loss geometry, approach-angle data bias, limited object-relative context  
-**Decision status:** review plan first; implementation starts only after approval
+**Decision status:** Phase 0 and most Phase 1 items are implemented; current blocker is contact recall + runtime wrist quality.
+
+---
+
+## Current Status — 2026-06-25
+
+Legend:
+
+- `[DONE]` implemented in code
+- `[PARTIAL]` implemented, but results show remaining quality gap
+- `[TODO]` not implemented yet
+
+Implemented in `src/train_lstm.py`:
+
+- `[DONE]` Rotation utilities and angular wrist metrics.
+- `[DONE]` Geodesic wrist loss.
+- `[DONE]` Teacher-forced and autoregressive validation metrics.
+- `[DONE]` Scheduled sampling training path.
+- `[DONE]` Contact-frame weighted wrist loss.
+- `[DONE]` Multi-source HOT3D + ARCTIC + DexYCB training loop with per-source validation.
+
+Implemented in dataset/build pipeline:
+
+- `[DONE]` Object-relative wrist position support via `--add_wrist_obj_pos`.
+- `[DONE]` Feature metadata/versioning fields in H5 (`feature_names`, `feature_dim`, `augmentation_flags`, etc.).
+- `[DONE]` Yaw augmentation support in dataset builders.
+
+Implemented for debugging/visualization:
+
+- `[DONE]` Python MP4 visualization for prediction vs ground truth.
+- `[DONE]` Unity-free synthetic 3D LSTM smoke test video.
+- `[PARTIAL]` MANO FK visualization works only when `smplx` is installed; current local fallback uses a procedural skeleton, so visual finger shape is approximate.
+
+New findings from MP4 + metric inspection:
+
+| Checkpoint | Seq | GT contact frames | Pred contact >= 0.5 | Max pred contact | Mean wrist error | Contact wrist error |
+|------------|-----|-------------------|---------------------|------------------|------------------|---------------------|
+| `checkpoints/lstm_right/best.pt` epoch 9 | 0 | 1085 | 14 | 0.838 | 126.5 deg | 119.6 deg |
+| `checkpoints/lstm_right_v2/best.pt` epoch 50 | 0 | 1085 | 0 | 0.338 | 105.9 deg | 105.6 deg |
+
+Interpretation:
+
+1. The issue is not primarily Unity. Python stateful inference already shows failure modes.
+2. Wrist orientation is still too inaccurate for grasp alignment, especially in runtime/autoregressive mode.
+3. Contact head is severely under-detecting contact; v2 improves wrist somewhat but becomes even more conservative on contact.
+4. Default right checkpoint may be stale (`lstm_right/best.pt` is epoch 9); `lstm_right_v2/best.pt` should be used for comparisons, but it still does not solve contact.
+5. Next work should prioritize contact recall, checkpoint selection criteria, and runtime wrist metrics before more Unity debugging.
 
 ---
 
 ## Executive Summary
 
-Mevcut model wrist rotation tahmininde iki temel sebeple sınırlanıyor:
+Mevcut model wrist rotation ve contact tahmininde üç temel sebeple sınırlanıyor:
 
 1. **Train/inference mismatch:** Training'de her frame input'undaki `wrist_rot_6d` ground-truth. Inference'ta ise bu alan ya controller'dan geliyor ya da modelin önceki tahmininden besleniyor. Model kendi hatasıyla eğitimde karşılaşmadığı için exposure bias oluşuyor.
-2. **Rotation loss mismatch:** 6D rotation representation iyi bir seçim, fakat 6D vektör MSE gerçek açısal rotasyon hatasını doğrudan optimize etmiyor.
+2. **Runtime wrist quality:** Geodesic loss ve scheduled sampling uygulanmış olmasına rağmen Python stateful inference hâlâ 100 derece üzeri wrist hatası gösterebiliyor.
+3. **Contact under-detection:** Contact head temas frame'lerini büyük oranda kaçırıyor. Seq0 örneğinde 1085 GT contact frame'e karşı v2 checkpoint `>=0.5` contact üretmiyor.
 
 Kısa vadede en yüksek getirili ve en düşük riskli paket:
 
-1. `wrist_deg` ve `final_wrist_deg` metriklerini ekle.
-2. Wrist loss'u 6D MSE'den geodesic angular loss'a taşı.
-3. Scheduled sampling ile autoregressive training ekle.
-4. Validation'a ayrıca autoregressive evaluation modu ekle.
-5. Contact-frame weighted wrist loss'u kontrollü şekilde dene.
+1. `[DONE]` `wrist_deg` ve `final_wrist_deg` metriklerini ekle.
+2. `[DONE]` Wrist loss'u 6D MSE'den geodesic angular loss'a taşı.
+3. `[DONE]` Scheduled sampling ile autoregressive training ekle.
+4. `[DONE]` Validation'a ayrıca autoregressive evaluation modu ekle.
+5. `[DONE]` Contact-frame weighted wrist loss'u kontrollü şekilde dene.
+6. `[TODO]` Contact imbalance için `pos_weight` / focal loss / threshold calibration ekle.
+7. `[TODO]` Best checkpoint seçimini `ar_loss` yerine runtime wrist + contact recall odaklı metrikle yap.
 
-Bu paket dataset rebuild gerektirmez ve mevcut model mimarisini bozmaz.
+İlk beş madde dataset rebuild gerektirmez ve mevcut model mimarisini bozmaz. Contact loss/selection değişiklikleri de dataset rebuild gerektirmez.
 
 ---
 
 ## Expected Impact Ranking
 
-| # | Change | Expected Impact | Risk | Effort | Phase |
-|---|--------|-----------------|------|--------|-------|
-| 1 | Wrist angular metrics | Required for measurement | Very low | Very low | 0 |
-| 2 | Geodesic wrist rotation loss | High | Low | Low | 1 |
-| 3 | Autoregressive validation | High for truthful evaluation | Low | Low | 1 |
-| 4 | Scheduled sampling | Very high | Medium | Medium | 1 |
-| 5 | Contact-frame weighted wrist loss | Medium-high | Medium | Low | 1 |
-| 6 | Object-relative wrist position | Medium-high | Low | Medium | 2 |
-| 7 | Yaw rotation augmentation | Medium | Medium | Medium | 2 |
-| 8 | Approach-angle balanced sampling | Medium | Low-medium | Medium | 2 |
-| 9 | Orientation-aware SDF injection | Medium | Medium | Low-medium | 3 |
-| 10 | Selective input noise augmentation | Low-medium | Low | Low | 3 |
-| 11 | Wrist angular velocity input | Low-medium | Medium | Medium | 3 |
+| # | Status | Change | Expected Impact | Risk | Effort | Phase |
+|---|--------|--------|-----------------|------|--------|-------|
+| 1 | DONE | Wrist angular metrics | Required for measurement | Very low | Very low | 0 |
+| 2 | DONE | Geodesic wrist rotation loss | High | Low | Low | 1 |
+| 3 | DONE | Autoregressive validation | High for truthful evaluation | Low | Low | 1 |
+| 4 | DONE | Scheduled sampling | Very high | Medium | Medium | 1 |
+| 5 | DONE | Contact-frame weighted wrist loss | Medium-high | Medium | Low | 1 |
+| 6 | TODO | Contact imbalance fix (`pos_weight` / focal loss) | Very high for contact recall | Medium | Low | 1 |
+| 7 | TODO | Runtime-aware checkpoint selection | High | Low | Low | 1 |
+| 8 | DONE | Object-relative wrist position | Medium-high | Low | Medium | 2 |
+| 9 | DONE | Yaw rotation augmentation support | Medium | Medium | Medium | 2 |
+| 10 | TODO | Approach-angle balanced sampling | Medium | Low-medium | Medium | 2 |
+| 11 | PARTIAL | Orientation-aware SDF injection | Medium | Medium | Low-medium | 3 |
+| 12 | TODO | Selective input noise augmentation | Low-medium | Low | Low | 3 |
+| 13 | TODO | Wrist angular velocity input | Low-medium | Medium | Medium | 3 |
 
 ---
 
@@ -78,9 +129,12 @@ Repo'da mevcut durum:
   - `_prepare_step(frame_feat, obj_embed)` exists
   - `initial_state(batch_size, device)` exists
 - `src/train_lstm.py`
-  - `temporal_loss()` currently uses `F.mse_loss(pred_wrist, tgt_wrist)`
-  - `evaluate_temporal()` currently reports total validation loss and final pose L1 only
-  - training loop currently calls `model.forward_sequence(inp_seq, obj_emb)`
+  - `[DONE]` `temporal_loss()` uses geodesic angular wrist loss.
+  - `[DONE]` `temporal_loss()` applies contact-frame wrist weighting.
+  - `[DONE]` `evaluate_temporal()` reports TF/AR-compatible metrics including `wrist_deg`, `final_wrist_deg`, `contact_wrist_deg`, `jitter_deg`, and `contact_bce`.
+  - `[DONE]` training loop can use `forward_sequence_scheduled_sampling(...)`.
+  - `[TODO]` contact BCE still uses unweighted `binary_cross_entropy`; contact recall is poor in runtime inspection.
+  - `[TODO]` best checkpoint currently follows primary AR loss, not an explicit contact-recall + wrist-runtime score.
 
 Assumed feature layout from dataset plan:
 
@@ -95,9 +149,10 @@ Assumed feature layout from dataset plan:
 | `17` | hand confidence |
 | `18:22` | grip one-hot |
 | `22:25` | bbox/local shape features |
-| `25:29` | current local SDF features or remaining core/SDF features, depending on builder |
+| `25:28` | optional `wrist_in_obj` when dataset was built with `--add_wrist_obj_pos` |
+| final `+4` | local SDF feature `[sdf_value, sdf_gradient_xyz]` from `sdf_features` |
 
-Before implementation, confirm feature layout directly in `build_dataset_temporal.py` and `TemporalWindowDataset`.
+Confirmed in `build_dataset_temporal.py` / `build_dataset_mano.py`: current processed right HOT3D H5 has `features=(N, 28)` and `sdf_features=(N, 4)`, while the checkpoint input is `feat_dim=29`, so current training/eval truncates or pads to match model input.
 
 ---
 
@@ -105,7 +160,7 @@ Before implementation, confirm feature layout directly in `build_dataset_tempora
 
 Goal: accuracy changes must be measured in the same geometry used by the task.
 
-### 0.1 Add Rotation Utilities
+### 0.1 Add Rotation Utilities — DONE
 
 Add utility functions to `src/train_lstm.py` or a shared small module if reuse is needed.
 
@@ -133,7 +188,7 @@ def rotation_angle_rad(pred_6d: torch.Tensor, tgt_6d: torch.Tensor) -> torch.Ten
     return torch.acos(cos)
 ```
 
-### 0.2 Extend Evaluation Metrics
+### 0.2 Extend Evaluation Metrics — DONE
 
 `evaluate_temporal()` should return a dictionary instead of only `(loss, pose_err)`.
 
@@ -156,7 +211,7 @@ metrics = {
 jitter_rad = rotation_angle_rad(pw[:, 1:, :], pw[:, :-1, :]).mean()
 ```
 
-### 0.3 Keep Teacher-Forced and Autoregressive Metrics Separate
+### 0.3 Keep Teacher-Forced and Autoregressive Metrics Separate — DONE
 
 Do not replace current validation immediately. Report both:
 
@@ -178,9 +233,9 @@ No dataset rebuild required.
 
 ---
 
-### 1. Geodesic Wrist Rotation Loss
+### 1. Geodesic Wrist Rotation Loss — DONE
 
-Current problem:
+Original problem:
 
 ```python
 wrist_loss = F.mse_loss(pred_wrist, tgt_wrist)
@@ -214,9 +269,14 @@ Expected result:
 - `final_wrist_deg` should decrease or stay stable.
 - Train loss numeric value may not be comparable to old runs.
 
+Current status:
+
+- Implemented in `src/train_lstm.py` via `rotation_angle_rad()` and `geodesic_loss()`.
+- Still not sufficient alone: v2 checkpoint improves wrist error versus epoch-9 checkpoint, but runtime wrist error remains too high for stable grasp alignment.
+
 ---
 
-### 2. Autoregressive Evaluation
+### 2. Autoregressive Evaluation — DONE
 
 Add an evaluation forward path that mimics inference.
 
@@ -265,9 +325,14 @@ Expected result before scheduled sampling:
 - `val_ar_*` is likely worse than `val_tf_*`.
 - The gap size quantifies the train/inference mismatch.
 
+Current status:
+
+- Implemented via `evaluate_temporal(..., autoregressive=True)` and stateful frame-by-frame forwarding.
+- Runtime inspection confirms this metric is necessary: Python stateful inference can fail even when global MPJPE metrics look acceptable.
+
 ---
 
-### 3. Scheduled Sampling
+### 3. Scheduled Sampling — DONE
 
 Current problem:
 
@@ -344,9 +409,15 @@ Expected result:
 - `val_tf_loss` may slightly worsen; that is acceptable if autoregressive metrics improve.
 - `jitter_deg` should be monitored carefully.
 
+Current status:
+
+- Implemented via `forward_sequence_scheduled_sampling()` and `get_ss_prob()`.
+- Training log shows scheduled sampling probability is logged.
+- Remaining issue: checkpoint selection and loss balance still allow poor contact recall and high runtime wrist error.
+
 ---
 
-### 4. Contact-Frame Weighted Wrist Loss
+### 4. Contact-Frame Weighted Wrist Loss — DONE / NEEDS RETUNING
 
 Current problem:
 
@@ -389,6 +460,113 @@ Expected result:
 
 - `final_wrist_deg` and `contact_wrist_deg` improve.
 - Average `wrist_deg` may improve less dramatically.
+
+Current status:
+
+- Implemented with `CONTACT_FRAME_EXTRA_W`.
+- Needs retuning because contact-frame wrist error remains high in runtime inspection (`~105 deg` for v2 on seq0 contact frames).
+
+---
+
+### 4.1 Contact Imbalance Fix — TODO
+
+Current problem:
+
+The contact head severely under-detects contact in Python stateful inference.
+
+Observed right-hand seq0:
+
+```text
+GT contact frames: 1085
+lstm_right/best.pt epoch 9:     pred_contact >= 0.5 on 14 frames
+lstm_right_v2/best.pt epoch 50: pred_contact >= 0.5 on 0 frames
+```
+
+Likely causes:
+
+- Contact positives are underweighted relative to pose/wrist losses.
+- Auxiliary ARCTIC/DexYCB sources currently have `contact_loss_w=0.0`, so contact learning is anchored mostly on HOT3D.
+- `BCE` with default class balance encourages conservative no-contact predictions when positives are sparse or noisy.
+
+Recommended implementation:
+
+1. Compute positive/negative contact ratio from HOT3D train split.
+2. Replace contact BCE with weighted BCE:
+
+```python
+contact_loss = F.binary_cross_entropy(
+    pred_contact.squeeze(-1),
+    contact_label,
+    weight=torch.where(contact_label > 0.5, pos_weight, neg_weight),
+)
+```
+
+Alternative if sigmoid is moved out of `SDFLSTMModel.contact_head`:
+
+```python
+contact_loss = F.binary_cross_entropy_with_logits(
+    contact_logits.squeeze(-1),
+    contact_label,
+    pos_weight=contact_pos_weight,
+)
+```
+
+3. Track contact metrics beyond BCE:
+
+```text
+contact_precision
+contact_recall
+contact_f1
+contact_auc_pr
+best_contact_threshold
+```
+
+4. Select the runtime threshold from validation PR/F1 rather than assuming `0.5`.
+
+Success target:
+
+- Seq0-style validation should show materially higher contact recall without making every near-object frame positive.
+- Primary checkpoint should not be accepted if contact recall is near zero.
+
+---
+
+### 4.2 Runtime-Aware Checkpoint Selection — TODO
+
+Current problem:
+
+`best.pt` is saved by primary AR loss. That can still select a model with unusable contact recall or high wrist error in contact frames.
+
+Recommended checkpoint score:
+
+```text
+primary_score =
+    val_hot3d_ar_final_wrist_deg
+  + 0.5 * val_hot3d_ar_contact_wrist_deg
+  + 20.0 * max(0, target_contact_recall - contact_recall)
+  + pose_penalty_if_pose_l1_regresses
+```
+
+Simpler first version:
+
+```text
+primary_score = hot3d_ar_final_wrist_deg + hot3d_ar_contact_wrist_deg
+```
+
+Do not use ARCTIC/DexYCB as the primary checkpoint criterion for runtime deployment. They are useful augmenters, but HOT3D is the runtime-like temporal source.
+
+Required log fields:
+
+```text
+best_metric_name
+hot3d_ar_final_wrist_deg
+hot3d_ar_contact_wrist_deg
+hot3d_contact_recall
+hot3d_contact_f1
+```
+
+Success target:
+
+- The selected checkpoint should be the one that improves runtime wrist/contact behavior, not just average validation loss.
 
 ---
 
@@ -444,7 +622,7 @@ Important: feature dimension changes invalidate old checkpoints.
 
 ---
 
-### 6. Object-Relative Wrist Position
+### 6. Object-Relative Wrist Position — DONE
 
 Current limitation:
 
@@ -475,8 +653,8 @@ best_core = np.concatenate([
 
 Expected dimension:
 
-- If current model input is 29, adding 3 dims makes it 32.
-- Confirm whether the final 4 dims are SDF/local features before editing.
+- Current processed HOT3D right H5: core `features` is 28 dims and `sdf_features` is 4 dims.
+- Current checkpoint input remains `feat_dim=29`, so old checkpoints are not fully using all current feature channels.
 
 Why useful:
 
@@ -488,9 +666,15 @@ Validation:
 - Compare seen-object and unseen-object splits if available.
 - Track per-object `final_wrist_deg`.
 
+Current status:
+
+- Implemented in builders behind `--add_wrist_obj_pos`.
+- Existing processed data includes `feature_dim=28`, indicating the object-relative wrist position was included.
+- Remaining work is not the builder change; it is making sure model/checkpoint input dimension and exported ONNX/Unity feature assembly consume the same feature contract.
+
 ---
 
-### 7. Yaw Rotation Augmentation
+### 7. Yaw Rotation Augmentation — DONE / NEEDS EXPERIMENT
 
 Goal:
 
@@ -542,9 +726,14 @@ Expected result:
 - Better performance on held-out approach-angle bins.
 - Average validation may improve less than angle-specific validation.
 
+Current status:
+
+- Builder support exists.
+- Need a controlled experiment and per-angle-bin validation before claiming accuracy improvement.
+
 ---
 
-### 8. Approach-Angle Balanced Sampling
+### 8. Approach-Angle Balanced Sampling — TODO
 
 Goal:
 
@@ -591,7 +780,7 @@ These are not first-priority because Phase 1 and Phase 2 are likely to provide c
 
 ---
 
-### 9. Orientation-Aware SDF Injection
+### 9. Orientation-Aware SDF Injection — PARTIAL
 
 Current limitation:
 
@@ -632,9 +821,14 @@ Expected result:
 - Better per-object and per-approach-side generalization.
 - Most useful after Phase 2 adds better object-relative context.
 
+Current status:
+
+- `SDFLSTMModel` has an `orientation_aware_sdf` option and checkpoint shape inference.
+- Needs a controlled training run and ONNX/Unity compatibility check before marking complete.
+
 ---
 
-### 10. Selective Input Noise Augmentation
+### 10. Selective Input Noise Augmentation — TODO
 
 Goal:
 
@@ -665,7 +859,7 @@ Expected result:
 
 ---
 
-### 11. Wrist Angular Velocity Input
+### 11. Wrist Angular Velocity Input — TODO
 
 Current idea:
 
@@ -996,39 +1190,41 @@ Decision rule:
 
 ### Week 1 — Measurement and Loss Geometry
 
-- Add `rot6d_to_matrix()`
-- Add `rotation_angle_rad()`
-- Add `wrist_deg`, `final_wrist_deg`, `jitter_deg`
-- Add autoregressive validation
-- Replace wrist MSE with geodesic loss
-- Run A0/A1 experiments
+- `[DONE]` Add `rot6d_to_matrix()`
+- `[DONE]` Add `rotation_angle_rad()`
+- `[DONE]` Add `wrist_deg`, `final_wrist_deg`, `jitter_deg`
+- `[DONE]` Add autoregressive validation
+- `[DONE]` Replace wrist MSE with geodesic loss
+- `[DONE]` Run initial A0/A1-style experiments
 
 ### Week 2 — Train/Inference Gap
 
-- Add scheduled sampling
-- Log `ss_prob`
-- Compare teacher-forced vs autoregressive validation
-- Tune `SS_MAX_PROB` among `0.25`, `0.50`, `0.75`
-- Add contact-frame weighted loss only after stable scheduled sampling
+- `[DONE]` Add scheduled sampling
+- `[DONE]` Log `ss_prob`
+- `[DONE]` Compare teacher-forced vs autoregressive validation
+- `[TODO]` Tune `SS_MAX_PROB` among `0.25`, `0.50`, `0.75`
+- `[DONE]` Add contact-frame weighted loss
+- `[TODO]` Add contact imbalance weighting and contact threshold calibration
+- `[TODO]` Change checkpoint selection to runtime wrist/contact metrics
 
 ### Week 3 — Dataset Features
 
-- Add `wrist_in_obj`
-- Version dataset
-- Rebuild dataset
-- Retrain from scratch
-- Add per-angle/per-object validation tables
+- `[DONE]` Add `wrist_in_obj`
+- `[DONE]` Version dataset metadata
+- `[DONE]` Rebuild dataset with current feature metadata
+- `[PARTIAL]` Retrain from scratch / v2 checkpoint exists, but runtime contact/wrist still poor
+- `[TODO]` Add per-angle/per-object validation tables
 
 ### Week 4 — Data Bias
 
-- Add yaw augmentation
-- Add approach-angle balanced sampler
-- Run angle-held-out validation if possible
+- `[DONE]` Add yaw augmentation support
+- `[TODO]` Add approach-angle balanced sampler
+- `[TODO]` Run angle-held-out validation if possible
 
 ### Week 5 — Optional Model Improvements
 
-- Orientation-aware SDF injection
-- Selective noise augmentation
+- `[PARTIAL]` Orientation-aware SDF injection option exists; needs controlled training/export validation
+- `[TODO]` Selective noise augmentation
 - Wrist angular velocity only if there is evidence it is needed
 
 ### Week 6 — Unity Visual Contact

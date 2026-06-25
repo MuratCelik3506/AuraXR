@@ -12,20 +12,32 @@ sys.path.insert(0, str(Path(__file__).parent))
 from model import SDFLSTMModel
 
 
-INPUT_DIM = 29
+DEFAULT_INPUT_DIM = 29
 EMBED_DIM = 32
 HIDDEN = 256
 LAYERS = 2
 POSE_DIM = 15
 
 
-def export_lstm(ckpt_path: Path, out_dir: Path, hand: str, opset: int = 14) -> Path:
-    model = SDFLSTMModel()
+def infer_feat_dim(state_dict: dict[str, torch.Tensor]) -> int:
+    weight = state_dict.get("feat_proj.0.weight")
+    return int(weight.shape[1]) if weight is not None else DEFAULT_INPUT_DIM
+
+
+def infer_orientation_aware(state_dict: dict[str, torch.Tensor]) -> bool:
+    weight = state_dict.get("obj_inj.0.weight")
+    return bool(weight is not None and int(weight.shape[1]) == 99)
+
+
+def export_lstm(ckpt_path: Path, out_dir: Path, hand: str, opset: int = 14) -> tuple[Path, int, bool]:
     ckpt = torch.load(ckpt_path, map_location="cpu")
+    input_dim = infer_feat_dim(ckpt["model"])
+    orientation_aware = infer_orientation_aware(ckpt["model"])
+    model = SDFLSTMModel(feat_dim=input_dim, orientation_aware_sdf=orientation_aware)
     model.load_state_dict(ckpt["model"])
     model.eval()
 
-    frame_feat = torch.zeros(1, INPUT_DIM)
+    frame_feat = torch.zeros(1, input_dim)
     obj_embed = torch.zeros(1, EMBED_DIM)
     h_0 = torch.zeros(LAYERS, 1, HIDDEN)
     c_0 = torch.zeros(LAYERS, 1, HIDDEN)
@@ -68,24 +80,25 @@ def export_lstm(ckpt_path: Path, out_dir: Path, hand: str, opset: int = 14) -> P
     assert h_n.shape == (LAYERS, 1, HIDDEN)
     assert c_n.shape == (LAYERS, 1, HIDDEN)
     print(f"Exported and validated {out_path}")
-    return out_path
+    return out_path, input_dim, orientation_aware
 
 
-def export_meta(out_dir: Path, hand: str, data_dir: Path | None):
+def export_meta(out_dir: Path, hand: str, data_dir: Path | None, input_dim: int, orientation_aware: bool):
     import h5py
 
     meta = {
         "architecture": {
             "model_type": "sdf_lstm",
-            "input_dim": INPUT_DIM,
+            "input_dim": input_dim,
             "embed_dim": EMBED_DIM,
             "lstm_hidden": HIDDEN,
             "lstm_layers": LAYERS,
             "output_dim": POSE_DIM,
             "output_type": "mano_pca",
+            "orientation_aware_sdf": orientation_aware,
         },
-        "feature_mean": [0.0] * 25,
-        "feature_std": [1.0] * 25,
+        "feature_mean": [0.0] * max(0, input_dim - 4),
+        "feature_std": [1.0] * max(0, input_dim - 4),
         "sdf_mean": [0.0] * 4,
         "sdf_std": [1.0] * 4,
         "target_mean": [0.0] * 15,
@@ -101,6 +114,11 @@ def export_meta(out_dir: Path, hand: str, data_dir: Path | None):
         for key in meta:
             if key != "architecture" and key in stored:
                 meta[key] = stored[key]
+        if "architecture" in stored:
+            meta["architecture"].update(stored["architecture"])
+            meta["architecture"]["model_type"] = "sdf_lstm"
+            meta["architecture"]["input_dim"] = input_dim
+    meta["architecture"]["orientation_aware_sdf"] = orientation_aware
 
     out = out_dir / f"model_meta_lstm_{hand}.json"
     out.write_text(json.dumps(meta, indent=2))
@@ -115,8 +133,8 @@ def main():
     parser.add_argument("--data_dir", default=None, type=Path)
     args = parser.parse_args()
 
-    export_lstm(args.ckpt, args.out_dir, args.hand)
-    export_meta(args.out_dir, args.hand, args.data_dir)
+    _, input_dim, orientation_aware = export_lstm(args.ckpt, args.out_dir, args.hand)
+    export_meta(args.out_dir, args.hand, args.data_dir, input_dim, orientation_aware)
 
 
 if __name__ == "__main__":

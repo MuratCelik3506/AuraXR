@@ -288,13 +288,20 @@ F_IDX_BBOX          = slice(22, 25)
 
 
 def mirror_feature(f: np.ndarray) -> np.ndarray:
-    """Mirror a 15-dim feature vector (left↔right hand flip via x-axis negation).
+    """Mirror a core feature vector (left↔right hand flip via x-axis negation).
 
     Converts a left-hand feature to an equivalent right-hand feature (or vice versa)
     by negating the x-components of the world-frame and object-local direction vectors.
     Scalar features (dist, approach_speed, grip_oh, bbox) are unchanged.
     """
-    return (f * FEATURE_MIRROR_MASK).astype(np.float32)
+    if f.shape[-1] == FEATURE_MIRROR_MASK.shape[0]:
+        mask = FEATURE_MIRROR_MASK
+    elif f.shape[-1] == FEATURE_MIRROR_MASK.shape[0] + 3:
+        # Optional v6 extension: wrist position in object frame [x,y,z].
+        mask = np.concatenate([FEATURE_MIRROR_MASK, np.array([-1, 1, 1], dtype=np.float32)])
+    else:
+        raise ValueError(f"Unsupported feature length for mirror_feature: {f.shape[-1]}")
+    return (f * mask).astype(np.float32)
 
 
 def mirror_joints(angles: np.ndarray) -> np.ndarray:
