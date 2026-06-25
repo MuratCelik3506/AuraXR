@@ -66,6 +66,15 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Build optional auxiliary datasets:
+
+```bash
+.venv/bin/python3 src/build_dataset_arctic.py --hand both
+.venv/bin/python3 src/build_dataset_dexycb.py --hand both
+```
+
+This creates `data/processed/arctic_mano/{left,right}` and `data/processed/dexycb_mano/{left,right}`. Training still consumes one hand at a time by selecting the matching directory.
+
 Train one hand:
 
 ```bash

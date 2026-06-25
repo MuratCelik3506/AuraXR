@@ -240,7 +240,7 @@ def main():
     p.add_argument("--dexycb_dir", default="data/raw/dexycb", type=Path)
     p.add_argument("--mano_dir",   default="data/models/mano", type=Path)
     p.add_argument("--out_dir",    default="data/processed/dexycb_mano", type=Path)
-    p.add_argument("--hand",       choices=["left", "right", "both"], default="right")
+    p.add_argument("--hand",       choices=["left", "right", "both"], default="both")
     p.add_argument("--val_frac",   type=float, default=0.15)
     p.add_argument("--seed",       type=int, default=42)
     args = p.parse_args()
