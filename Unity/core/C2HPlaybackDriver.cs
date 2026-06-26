@@ -37,6 +37,25 @@ namespace AuraXR
         public bool applyWristPose = true;
         public bool applyObjectPose = true;
 
+        [Header("Scene Alignment")]
+        [Tooltip("Align HOT3D world coordinates to the current Unity scene by keeping the first playback object pose at the object's scene position.")]
+        public bool alignToSceneObjectAnchor = true;
+        [Tooltip("If true, capture objectRoot's current scene pose as the anchor during Initialize(). Disable this when sceneObjectAnchorPosition is configured explicitly.")]
+        public bool captureAnchorOnInitialize = false;
+        public Vector3 sceneObjectAnchorPosition;
+        public Quaternion sceneObjectAnchorRotation = Quaternion.identity;
+
+        [Header("Skeleton Visualization")]
+        [Tooltip("Draw the predicted (free-running) MANO hand as a procedural sphere+bone skeleton from the exported pred_joints. " +
+                 "Lets multiple scenario drivers render their own hand side by side without an OVR rig.")]
+        public bool renderSkeleton = false;
+        [Tooltip("Also draw the ground-truth hand (gt_joints) as a second, ghost-colored skeleton for comparison.")]
+        public bool renderGroundTruth = false;
+        public float jointSphereRadius = 0.008f;
+        public float boneThickness = 0.004f;
+        public Color predColor = new Color(0.20f, 0.80f, 1.00f, 1f);
+        public Color gtColor = new Color(1.00f, 0.55f, 0.15f, 1f);
+
         [Header("Debug")]
         public float parityThreshold = 1e-3f;
         public bool verboseFrameLog = false;
@@ -53,12 +72,27 @@ namespace AuraXR
         private int _frameIndex;
         private float _accum;
         private bool _ready;
+        private Vector3 _playbackObjectAnchorPosition;
+        private Quaternion _playbackObjectAnchorRotation = Quaternion.identity;
+        private Vector3 _sceneTranslationOffset;
+        private Quaternion _sceneRotationOffset = Quaternion.identity;
+        private bool _alignmentReady;
 
+        private const int JointCount = 16;   // MANO wrist + 15 finger joints (from src/mano_torch.py)
+        private Transform _skeletonRoot;
+        private Transform[] _predJointT;
+        private Transform[] _predBoneT;
+        private Transform[] _gtJointT;
+        private Transform[] _gtBoneT;
+
+        // Model now outputs 45-dim MANO finger axis-angle (aa45). The legacy "pca15"
+        // naming is kept only in field names for back-compat; the real dim is 45.
+        private const int PoseDim = 45;
         private const string InputFeat = "feat";
         private const string InputCategory = "category";
         private const string InputH = "h0";
         private const string InputC = "c0";
-        private const string OutputPca = "pca15";
+        private const string OutputPca = "aa45";
         private const string OutputH = "hn";
         private const string OutputC = "cn";
 
@@ -145,6 +179,7 @@ namespace AuraXR
             _hidden = _playback.hidden > 0 ? _playback.hidden : 256;
             _h = new float[_hidden];
             _c = new float[_hidden];
+            ConfigureSceneAlignment();
 
             var model = ModelLoader.Load(modelAsset);
             _worker = new Worker(model, BackendType.CPU);
@@ -171,7 +206,7 @@ namespace AuraXR
             for (int t = 0; t < _playback.frames.Count; t++)
             {
                 float[] pca = RunInference(_playback.frames[t], updateState: true);
-                for (int i = 0; i < 15; i++)
+                for (int i = 0; i < PoseDim; i++)
                 {
                     float diff = Mathf.Abs(pca[i] - _playback.frames[t].pcaExpected[i]);
                     if (diff > maxDiff)
@@ -259,14 +294,14 @@ namespace AuraXR
             var hnTensor = _worker.PeekOutput(OutputH) as Tensor<float>;
             var cnTensor = _worker.PeekOutput(OutputC) as Tensor<float>;
             if (pcaTensor == null || hnTensor == null || cnTensor == null)
-                throw new InvalidOperationException("[C2HPlayback] Missing ONNX output. Expected pca15, hn, cn.");
+                throw new InvalidOperationException("[C2HPlayback] Missing ONNX output. Expected aa45, hn, cn.");
 
             using var pcaCpu = pcaTensor.ReadbackAndClone();
             using var hnCpu = hnTensor.ReadbackAndClone();
             using var cnCpu = cnTensor.ReadbackAndClone();
 
-            var pca = new float[15];
-            for (int i = 0; i < 15; i++)
+            var pca = new float[PoseDim];
+            for (int i = 0; i < PoseDim; i++)
                 pca[i] = pcaCpu[0, 0, i];
 
             if (updateState)
@@ -283,10 +318,12 @@ namespace AuraXR
 
         private void ApplyFrame(PlaybackFrame frame, float[] pca)
         {
-            Vector3 wristPos = Hot3DPositionToUnity(frame.wristT);
+            Vector3 wristPos = TransformPlaybackPosition(Hot3DPositionToUnity(frame.wristT));
             Quaternion wristRot = Hot3DRotationToUnity(frame.wristQ);
-            Vector3 objPos = Hot3DPositionToUnity(frame.objT);
+            wristRot = TransformPlaybackRotation(wristRot);
+            Vector3 objPos = TransformPlaybackPosition(Hot3DPositionToUnity(frame.objT));
             Quaternion objRot = Hot3DRotationToUnity(frame.objQ);
+            objRot = TransformPlaybackRotation(objRot);
 
             if (applyWristPose && wristRoot != null)
             {
@@ -298,6 +335,9 @@ namespace AuraXR
                 objectRoot.SetPositionAndRotation(objPos, objRot);
             }
 
+            if (renderSkeleton)
+                UpdateSkeleton(frame);
+
             if (inferenceManager == null)
                 return;
 
@@ -305,7 +345,10 @@ namespace AuraXR
             if (pose == null)
                 pose = new HandPose();
 
-            Array.Copy(pca, pose.ManoJointAngles, 15);
+            // pca is now 45-dim aa; ManoJointAngles may be shorter (legacy 15). Copy what fits
+            // so the shared-rig path (default driver) does not throw. Scenario drivers skip this
+            // block entirely (inferenceManager == null) and render via pred_joints instead.
+            Array.Copy(pca, pose.ManoJointAngles, Math.Min(pca.Length, pose.ManoJointAngles.Length));
             pose.WristPosition = wristPos;
             pose.WristRotation = wristRot;
             pose.ApproachDirection = (objPos - wristPos).sqrMagnitude > 1e-8f
@@ -318,6 +361,172 @@ namespace AuraXR
                 inferenceManager.RightHand = pose;
             else
                 inferenceManager.LeftHand = pose;
+        }
+
+        // ── Procedural skeleton visualization ──────────────────────────────────
+        // Renders the exported MANO joint world-positions (pred_joints / gt_joints)
+        // as spheres + bone cylinders so each scenario driver shows its own hand
+        // without an OVR rig. Joints are HOT3D world coords → converted + scene-aligned
+        // exactly like wrist/object poses.
+
+        private void UpdateSkeleton(PlaybackFrame frame)
+        {
+            int[] parents = _playback?.jointParents;
+            if (frame.predJoints == null || parents == null || parents.Length < JointCount)
+                return;
+
+            EnsureSkeleton();
+
+            UpdateChain(frame.predJoints, parents, _predJointT, _predBoneT);
+
+            bool showGt = renderGroundTruth && frame.gtJoints != null;
+            SetChainActive(_gtJointT, _gtBoneT, showGt);
+            if (showGt)
+                UpdateChain(frame.gtJoints, parents, _gtJointT, _gtBoneT);
+        }
+
+        private void EnsureSkeleton()
+        {
+            if (_skeletonRoot != null)
+                return;
+
+            var rootGo = new GameObject($"{name} Skeleton");
+            rootGo.transform.SetParent(transform, worldPositionStays: false);
+            _skeletonRoot = rootGo.transform;
+
+            BuildChain("pred", predColor, out _predJointT, out _predBoneT);
+            BuildChain("gt", gtColor, out _gtJointT, out _gtBoneT);
+            SetChainActive(_gtJointT, _gtBoneT, renderGroundTruth);
+        }
+
+        private void BuildChain(string label, Color color, out Transform[] joints, out Transform[] bones)
+        {
+            Material mat = MakeMaterial(color);
+            joints = new Transform[JointCount];
+            bones = new Transform[JointCount];   // index j holds the bone from parents[j] to j (j>=1)
+
+            for (int j = 0; j < JointCount; j++)
+            {
+                var sphere = CreatePrimitiveNoCollider(PrimitiveType.Sphere, $"{label}_joint_{j}", mat);
+                sphere.SetParent(_skeletonRoot, worldPositionStays: false);
+                float d = jointSphereRadius * 2f;
+                sphere.localScale = new Vector3(d, d, d);
+                joints[j] = sphere;
+
+                if (j >= 1)
+                {
+                    var bone = CreatePrimitiveNoCollider(PrimitiveType.Cylinder, $"{label}_bone_{j}", mat);
+                    bone.SetParent(_skeletonRoot, worldPositionStays: false);
+                    bones[j] = bone;
+                }
+            }
+        }
+
+        private void UpdateChain(float[] joints48, int[] parents, Transform[] jointT, Transform[] boneT)
+        {
+            for (int j = 0; j < JointCount; j++)
+            {
+                if (jointT[j] != null)
+                    jointT[j].position = WorldJoint(joints48, j);
+            }
+
+            for (int j = 1; j < JointCount; j++)
+            {
+                int p = parents[j];
+                if (boneT[j] == null || p < 0 || p >= JointCount)
+                    continue;
+
+                Vector3 a = jointT[p].position;
+                Vector3 b = jointT[j].position;
+                Vector3 dir = b - a;
+                float len = dir.magnitude;
+                // Unity cylinder is 2 units tall along local Y → half-length scale on Y.
+                boneT[j].position = (a + b) * 0.5f;
+                boneT[j].rotation = len > 1e-6f
+                    ? Quaternion.FromToRotation(Vector3.up, dir)
+                    : Quaternion.identity;
+                boneT[j].localScale = new Vector3(boneThickness, Mathf.Max(len * 0.5f, 1e-5f), boneThickness);
+            }
+        }
+
+        private Vector3 WorldJoint(float[] joints48, int j)
+        {
+            int b = j * 3;
+            Vector3 hot3d = new Vector3(joints48[b], joints48[b + 1], -joints48[b + 2]);
+            return TransformPlaybackPosition(hot3d);
+        }
+
+        private static void SetChainActive(Transform[] jointT, Transform[] boneT, bool active)
+        {
+            if (jointT == null)
+                return;
+            foreach (var t in jointT)
+                if (t != null && t.gameObject.activeSelf != active) t.gameObject.SetActive(active);
+            if (boneT != null)
+                foreach (var t in boneT)
+                    if (t != null && t.gameObject.activeSelf != active) t.gameObject.SetActive(active);
+        }
+
+        private static Transform CreatePrimitiveNoCollider(PrimitiveType type, string name, Material mat)
+        {
+            var go = GameObject.CreatePrimitive(type);
+            go.name = name;
+            var col = go.GetComponent<Collider>();
+            if (col != null) Destroy(col);
+            var rend = go.GetComponent<Renderer>();
+            if (rend != null) rend.sharedMaterial = mat;
+            return go.transform;
+        }
+
+        private static Material MakeMaterial(Color color)
+        {
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit")
+                            ?? Shader.Find("Standard")
+                            ?? Shader.Find("Unlit/Color")
+                            ?? Shader.Find("Sprites/Default");
+            var mat = new Material(shader) { color = color };
+            return mat;
+        }
+
+        private void ConfigureSceneAlignment()
+        {
+            _alignmentReady = false;
+            _sceneRotationOffset = Quaternion.identity;
+            _sceneTranslationOffset = Vector3.zero;
+
+            if (!alignToSceneObjectAnchor || _playback == null || _playback.frames.Count == 0)
+                return;
+
+            PlaybackFrame first = _playback.frames[0];
+            _playbackObjectAnchorPosition = Hot3DPositionToUnity(first.objT);
+            _playbackObjectAnchorRotation = Hot3DRotationToUnity(first.objQ);
+
+            if (captureAnchorOnInitialize && objectRoot != null)
+            {
+                sceneObjectAnchorPosition = objectRoot.position;
+                sceneObjectAnchorRotation = objectRoot.rotation;
+            }
+
+            _sceneRotationOffset = sceneObjectAnchorRotation * Quaternion.Inverse(_playbackObjectAnchorRotation);
+            _sceneTranslationOffset = sceneObjectAnchorPosition - (_sceneRotationOffset * _playbackObjectAnchorPosition);
+            _alignmentReady = true;
+
+            Debug.Log($"[C2HPlayback] Scene alignment enabled. playbackObj0={_playbackObjectAnchorPosition:F4} " +
+                      $"sceneObj0={sceneObjectAnchorPosition:F4} offset={_sceneTranslationOffset:F4}");
+        }
+
+        private Vector3 TransformPlaybackPosition(Vector3 playbackPosition)
+        {
+            if (!alignToSceneObjectAnchor || !_alignmentReady)
+                return playbackPosition;
+            return _sceneRotationOffset * playbackPosition + _sceneTranslationOffset;
+        }
+
+        private Quaternion TransformPlaybackRotation(Quaternion playbackRotation)
+        {
+            if (!alignToSceneObjectAnchor || !_alignmentReady)
+                return playbackRotation;
+            return _sceneRotationOffset * playbackRotation;
         }
 
         private void ResetState()
@@ -396,6 +605,7 @@ namespace AuraXR
     {
         public string objectName;
         public int hidden;
+        public int[] jointParents;   // MANO kintree, length 16 ([-1,0,1,2,...]); null if absent
         public readonly List<PlaybackFrame> frames = new List<PlaybackFrame>();
     }
 
@@ -409,6 +619,8 @@ namespace AuraXR
         public float[] wristQ;
         public float[] objT;
         public float[] objQ;
+        public float[] predJoints;   // 16*3 HOT3D world joints (free-running); null if absent
+        public float[] gtJoints;     // 16*3 HOT3D world joints (ground truth); null if absent
     }
 
     internal static class C2HPlaybackJson
@@ -420,7 +632,8 @@ namespace AuraXR
             var data = new PlaybackData
             {
                 objectName = ExtractString(json, "object", "unknown"),
-                hidden = ExtractInt(json, "hidden", 256)
+                hidden = ExtractInt(json, "hidden", 256),
+                jointParents = TryExtractIntArray(json, "joint_parents")
             };
 
             int key = json.IndexOf("\"frames\"", StringComparison.Ordinal);
@@ -442,12 +655,14 @@ namespace AuraXR
                 {
                     feat = ExtractFloatArray(frameJson, "feat", 13),
                     category = ExtractInt(frameJson, "category", 0),
-                    pcaExpected = ExtractFloatArray(frameJson, "pca_expected", 15),
-                    pcaGt = ExtractFloatArray(frameJson, "pca_gt", 15),
+                    pcaExpected = ExtractFloatArray(frameJson, "pca_expected", 45),
+                    pcaGt = ExtractFloatArray(frameJson, "pca_gt", 45),
                     wristT = ExtractFloatArray(frameJson, "wrist_t", 3),
                     wristQ = ExtractFloatArray(frameJson, "wrist_q", 4),
                     objT = ExtractFloatArray(frameJson, "obj_t", 3),
-                    objQ = ExtractFloatArray(frameJson, "obj_q", 4)
+                    objQ = ExtractFloatArray(frameJson, "obj_q", 4),
+                    predJoints = TryExtractFloatArray(frameJson, "pred_joints", 16 * 3),
+                    gtJoints = TryExtractFloatArray(frameJson, "gt_joints", 16 * 3)
                 });
                 i = objEnd + 1;
             }
@@ -485,6 +700,31 @@ namespace AuraXR
             int start = json.IndexOf('"', colon + 1) + 1;
             int end = json.IndexOf('"', start);
             return start > 0 && end > start ? json.Substring(start, end - start) : fallback;
+        }
+
+        /// <summary>Like ExtractFloatArray but returns null if the key is absent (optional fields).</summary>
+        private static float[] TryExtractFloatArray(string json, string key, int expected)
+        {
+            int keyPos = json.IndexOf("\"" + key + "\"", StringComparison.Ordinal);
+            if (keyPos < 0)
+                return null;
+            return ExtractFloatArray(json, key, expected);
+        }
+
+        /// <summary>Parse an integer array (e.g. joint_parents). Returns null if the key is absent.</summary>
+        private static int[] TryExtractIntArray(string json, string key)
+        {
+            int keyPos = json.IndexOf("\"" + key + "\"", StringComparison.Ordinal);
+            if (keyPos < 0)
+                return null;
+
+            int start = json.IndexOf('[', keyPos);
+            int end = FindMatching(json, start, '[', ']');
+            string[] parts = json.Substring(start + 1, end - start - 1).Split(',');
+            var values = new int[parts.Length];
+            for (int i = 0; i < parts.Length; i++)
+                values[i] = int.Parse(parts[i].Trim(), NumberStyles.Integer, Inv);
+            return values;
         }
 
         private static float[] ExtractFloatArray(string json, string key, int expected)

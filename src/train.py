@@ -35,7 +35,7 @@ def mpjpe_mm(pred_pca, betas, wq, wt, gt_joints, mano, cap=3000):
     idx = np.random.choice(N, min(cap, N), replace=False)
     errs = []
     for i in idx:
-        aa = mano.decode_pca(pred_pca[i])
+        aa = pred_pca[i]   # cikti zaten aa45 (decode yok)
         j = mano.fk(aa, betas[i], wq[i], wt[i], shaped=mano.shaped_cached(betas[i]))["joints"]
         errs.append(np.linalg.norm(j - gt_joints[i], axis=1).mean())
     return float(np.mean(errs) * 1000.0)
@@ -74,6 +74,9 @@ def main():
     ap.add_argument("--obj_size", action="store_true", help="obje bbox extent koşullama (+3 feat)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--no_prev", action="store_true", help="prev_pose'u kaldir (non-autoregressive)")
+    ap.add_argument("--arch", default="lstm", choices=["lstm", "tcn", "transformer"])
+    ap.add_argument("--warmup", type=int, default=2, help="warmup epoch (lineer LR rampasi)")
+    ap.add_argument("--patience", type=int, default=8, help="erken durdurma sabri (val MPJPE)")
     ap.add_argument("--tag", default="best")
     args = ap.parse_args()
     random.seed(args.seed); np.random.seed(args.seed); torch.manual_seed(args.seed)
@@ -88,25 +91,41 @@ def main():
     va = DataLoader(GraspSegments("val", mean, std, obj_size=args.obj_size), batch_size=args.batch,
                     shuffle=False, collate_fn=collate)
     mano = ManoRight()
-    mano_fk = ManoTorchFK().to(dev) if args.lambda_fk > 0 else None
+    # FK loss CPU'da: MPS'te 16-eklem zinciri (tiny matmul) kernel-launch overhead'iyle cok yavas.
+    mano_fk = ManoTorchFK() if args.lambda_fk > 0 else None
     model = ControllerToHand(hidden=args.hidden, layers=args.layers,
-                             use_prev=not args.no_prev, feat_dim=feat_dim).to(dev)
+                             use_prev=not args.no_prev, feat_dim=feat_dim,
+                             arch=args.arch).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+
+    def lr_factor(ep):  # ep: 1..epochs. warmup lineer -> cosine decay.
+        if ep <= args.warmup:
+            return ep / max(1, args.warmup)
+        import math
+        prog = (ep - args.warmup) / max(1, args.epochs - args.warmup)
+        return 0.5 * (1 + math.cos(math.pi * min(1.0, prog)))
+    sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_factor)
     print(f"params: {sum(p.numel() for p in model.parameters())} | feat_dim={feat_dim} "
-          f"use_prev={not args.no_prev} fk={args.lambda_fk} ss={args.ss}")
+          f"use_prev={not args.no_prev} fk={args.lambda_fk} ss={args.ss} "
+          f"warmup={args.warmup} patience={args.patience}")
+
+    FK_SUB = 256   # FK loss derin zincir; her batch rastgele alt-kume (stokastik tahmin, ~10x ucuz)
 
     def fk_loss(pred, b, mask):
-        v = mask.reshape(-1).bool()
-        P = pred.reshape(-1, POSE_DIM)[v]
-        Bb = b["betas"].to(dev).reshape(-1, 10)[v]
-        Q = b["wrist_q"].to(dev).reshape(-1, 4)[v]
-        T = b["wrist_t"].to(dev).reshape(-1, 3)[v]
-        GJ = b["fk_joints"].to(dev).reshape(-1, 16, 3)[v]
+        v = b["mask"].reshape(-1).bool()                      # CPU mask
+        idx = v.nonzero(as_tuple=True)[0]
+        if len(idx) > FK_SUB:
+            idx = idx[torch.randperm(len(idx))[:FK_SUB]]
+        P = pred.reshape(-1, POSE_DIM).cpu()[idx]             # MPS->CPU (autograd korunur)
+        Bb = b["betas"].reshape(-1, 10)[idx]
+        Q = b["wrist_q"].reshape(-1, 4)[idx]
+        T = b["wrist_t"].reshape(-1, 3)[idx]
+        GJ = b["fk_joints"].reshape(-1, 16, 3)[idx]
         J = mano_fk.joints(P, Bb, Q, T)
-        return (J - GJ).norm(dim=2).mean()
+        return (J - GJ).norm(dim=2).mean().to(pred.device)
 
     log = []
-    best = 1e9
+    best = 1e9; bad = 0
     for ep in range(1, args.epochs + 1):
         model.train(); t0 = time.time()
         ss_prob = args.ss_max * min(1.0, (ep - 1) / max(1, 0.6 * args.epochs)) if args.ss else 0.0
@@ -134,18 +153,35 @@ def main():
                    train_fk=tlf/nb, ss_prob=round(ss_prob, 3),
                    val_pose_mse=vpose, val_mpjpe_mm=vmpjpe, sec=round(time.time()-t0, 1))
         log.append(rec)
+        sched.step()
         flag = ""
-        if vmpjpe < best:
-            best = vmpjpe
+        if vmpjpe < best - 1e-3:
+            best = vmpjpe; bad = 0
             torch.save(dict(model=model.state_dict(), args=vars(args),
                             mean=mean, std=std), os.path.join(CKPT, f"c2h_{args.tag}.pt"))
             flag = " *best"
-        print(f"ep{ep:02d} train={rec['train_loss']:.4f} (pose={rec['train_pose']:.4f} "
-              f"vel={rec['train_vel']:.4f}) | val_pose={vpose:.4f} val_MPJPE={vmpjpe:.1f}mm "
-              f"{rec['sec']}s{flag}")
+        else:
+            bad += 1
+        print(f"ep{ep:02d} lr={opt.param_groups[0]['lr']:.1e} train={rec['train_loss']:.4f} "
+              f"(pose={rec['train_pose']:.4f} vel={rec['train_vel']:.4f}) | val_pose={vpose:.4f} "
+              f"val_MPJPE={vmpjpe:.1f}mm {rec['sec']}s{flag}")
+        if bad >= args.patience:
+            print(f"erken durdurma (ep{ep}, {args.patience} epoch iyilesme yok)")
+            break
 
-    json.dump(log, open(os.path.join(RESULTS, "train_log.json"), "w"), indent=2)
-    print("best val MPJPE (mm):", round(best, 2), "| log -> results/train_log.json")
+    json.dump(log, open(os.path.join(RESULTS, f"train_log_{args.tag}.json"), "w"), indent=2)
+    print("best val MPJPE (mm):", round(best, 2), f"| log -> results/train_log_{args.tag}.json")
+
+    # --- en iyi checkpoint'i yukle + TEST'te kapsamli otomatik degerlendirme ---
+    from eval_metrics import full_eval, print_report
+    bestck = torch.load(os.path.join(CKPT, f"c2h_{args.tag}.pt"), map_location=dev, weights_only=False)
+    eval_model = ControllerToHand(hidden=args.hidden, layers=args.layers,
+                                  use_prev=not args.no_prev, feat_dim=feat_dim,
+                                  arch=args.arch).to(dev)
+    eval_model.load_state_dict(bestck["model"])
+    rep = full_eval(eval_model, mano, mean, std, args.obj_size, dev, split="test", tag=args.tag)
+    print_report(rep)
+    print(f"otomatik eval -> results/eval_{args.tag}.json + by_object_{args.tag}.csv")
 
 
 if __name__ == "__main__":

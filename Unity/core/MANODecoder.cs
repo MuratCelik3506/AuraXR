@@ -168,6 +168,38 @@ namespace AuraXR
             return _result;
         }
 
+        /// <summary>
+        /// Decode a 45-dim MANO axis-angle pose to per-joint quaternions.
+        /// The model now outputs axis-angle directly (no PCA), so this skips Step 1
+        /// (PCA decode). Basis-free: works without LoadFromJson. Mirrors Decode() Steps 2–3.
+        /// </summary>
+        public Quaternion[] DecodeAxisAngle(float[] aa45)
+        {
+            if (aa45 == null || aa45.Length != AA_DIM)
+            {
+                for (int j = 0; j < N_JOINTS; j++) _result[j] = Quaternion.identity;
+                return _result;
+            }
+            for (int j = 0; j < N_JOINTS; j++)
+            {
+                int   base_ = j * 3;
+                float ax = aa45[base_], ay = aa45[base_ + 1], az = aa45[base_ + 2];
+                float angle = Mathf.Sqrt(ax*ax + ay*ay + az*az);
+                if (angle < 1e-6f)
+                {
+                    _result[j] = Quaternion.identity;
+                }
+                else
+                {
+                    float invAngle = 1f / angle;
+                    // MANO right-handed → Unity left-handed: negate z of axis (as in Decode)
+                    Vector3 axis = new Vector3(ax * invAngle, ay * invAngle, -az * invAngle);
+                    _result[j]   = Quaternion.AngleAxis(angle * Mathf.Rad2Deg, axis);
+                }
+            }
+            return _result;
+        }
+
         // ── Identity fallback ──────────────────────────────────────────────────
 
         /// <summary>Returns identity rotations for all 15 joints (open-hand neutral).</summary>

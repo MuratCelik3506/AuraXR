@@ -11,16 +11,21 @@ import collections
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CANON = os.path.join(_REPO, "data", "processed", "hot3d_canonical")
 
-# Sabit atama (tekrar-uretilebilirlik). Hepsinde hook/power/wide var.
+# Sabit atama (tekrar-uretilebilirlik). HOT3D: hepsinde hook/power/wide var.
+# DexYCB: DX01-DX08 train, DX09 val, DX10 test (denek-held-out, sizinti yok).
 SUBJECTS = {
-    "train": ["P0002", "P0003", "P0010", "P0013"],
-    "val":   ["P0018"],
-    "test":  ["P0017", "P0021"],
+    "train": ["P0002", "P0003", "P0010", "P0013",
+              "DX01", "DX02", "DX03", "DX04", "DX05", "DX06", "DX07", "DX08"],
+    "val":   ["P0018", "DX09"],
+    "test":  ["P0017", "P0021", "DX10"],
 }
 
 
 def main():
     rows = list(csv.DictReader(open(os.path.join(CANON, "manifest.csv"))))
+    dx_path = os.path.join(CANON, "manifest_dexycb.csv")
+    if os.path.exists(dx_path):
+        rows += list(csv.DictReader(open(dx_path)))
     subj2split = {s: sp for sp, subs in SUBJECTS.items() for s in subs}
     seqs = collections.defaultdict(list)
     frames = collections.Counter()

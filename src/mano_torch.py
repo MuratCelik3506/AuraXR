@@ -36,12 +36,12 @@ class ManoTorchFK(nn.Module):
         """(N,15) -> (N,45) axis-angle."""
         return self.mean + pca15 @ self.comp
 
-    def joints(self, pca15, betas, wrist_q, wrist_t):
-        """(N,15),(N,10),(N,4 wxyz),(N,3) -> (N,16,3) dunya eklemleri."""
-        N = pca15.shape[0]
-        dev = pca15.device
-        aa45 = self.decode(pca15).reshape(N, 15, 3)
-        full = torch.zeros(N, 16, 3, device=dev, dtype=pca15.dtype)
+    def joints(self, pose, betas, wrist_q, wrist_t):
+        """pose (N,45 aa) veya (N,15 pca), (N,10),(N,4 wxyz),(N,3) -> (N,16,3) dunya eklem."""
+        N = pose.shape[0]
+        dev = pose.device
+        aa45 = (pose if pose.shape[1] == 45 else self.decode(pose)).reshape(N, 15, 3)
+        full = torch.zeros(N, 16, 3, device=dev, dtype=pose.dtype)
         full[:, 1:] = aa45
         R = _rodrigues(full.reshape(N * 16, 3)).reshape(N, 16, 3, 3)
 

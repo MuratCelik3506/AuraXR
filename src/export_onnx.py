@@ -39,12 +39,15 @@ def main():
     os.makedirs(ONNX_DIR, exist_ok=True)
     ck = torch.load(args.ckpt, map_location="cpu", weights_only=False)
     assert ck["args"].get("no_prev", False), "Bu export no_prev model icin."
+    assert ck["args"].get("arch", "lstm") == "lstm", "Stateful step export sadece LSTM icin."
     hidden = ck["args"]["hidden"]; layers = ck["args"]["layers"]
-    m = ControllerToHand(hidden=hidden, layers=layers, use_prev=False)
+    obj_size = ck["args"].get("obj_size", False)
+    feat_dim = 16 if obj_size else 13
+    m = ControllerToHand(hidden=hidden, layers=layers, use_prev=False, feat_dim=feat_dim)
     m.load_state_dict(ck["model"]); m.eval()
     step = StepModule(m).eval()
 
-    feat = torch.zeros(1, 1, FEAT_DIM)
+    feat = torch.zeros(1, 1, feat_dim)
     cat = torch.zeros(1, 1, dtype=torch.long)
     h0 = torch.zeros(layers, 1, hidden); c0 = torch.zeros(layers, 1, hidden)
     out_path = os.path.join(ONNX_DIR, "c2h_step.onnx")
@@ -56,23 +59,28 @@ def main():
     torch.onnx.export(
         step, (feat, cat, h0, c0), out_path,
         input_names=["feat", "category", "h0", "c0"],
-        output_names=["pca15", "hn", "cn"],
+        output_names=["aa45", "hn", "cn"],   # cikti artik 45-dim axis-angle (eski: pca15)
         opset_version=17, dynamo=False,
     )
     print("export ->", out_path, f"({os.path.getsize(out_path)} bytes)")
 
     # stats + meta yaz (Unity icin)
-    meta = dict(hidden=hidden, layers=layers, feat_dim=FEAT_DIM, pose_dim=POSE_DIM,
+    fo = ["rel_pos(3)", "rel_rot6d(6)", "rel_vel(3)", "dist(1)"]
+    if obj_size:
+        fo.append("obj_extent(3)")
+    meta = dict(hidden=hidden, layers=layers, feat_dim=feat_dim, pose_dim=POSE_DIM,
+                output="aa45", obj_size=obj_size,
                 input_mean=ck["mean"].tolist(), input_std=ck["std"].tolist(),
-                feature_order=["rel_pos(3)", "rel_rot6d(6)", "rel_vel(3)", "dist(1)"],
-                categories=["hook", "power", "wide"], use_prev=False)
+                feature_order=fo, categories=["hook", "power", "wide", "pinch"], use_prev=False,
+                note="Cikti 45-dim axis-angle (MANO finger). Unity: PCA decode YOK, "
+                     "MANODecoder.DecodeAxisAngle ile dogrudan quaternion.")
     json.dump(meta, open(os.path.join(ONNX_DIR, "c2h_meta.json"), "w"), indent=2)
 
     # --- parite: torch free-running vs onnxruntime tek-adim ---
     import onnxruntime as ort
     sess = ort.InferenceSession(out_path, providers=["CPUExecutionProvider"])
-    ds = GraspSegments("test", ck["mean"], ck["std"])
-    seg = next(s for s in ds.segments if s["obj_name"] == "mug_white")
+    ds = GraspSegments("test", ck["mean"], ck["std"], obj_size=obj_size)
+    seg = next((s for s in ds.segments if s["obj_name"] == "mug_white"), ds.segments[0])
     feat_np = seg["feat"].astype(np.float32); cat_np = seg["cat"].astype(np.int64)
     with torch.no_grad():
         torch_out = m.forward_free(torch.as_tensor(feat_np)[None],

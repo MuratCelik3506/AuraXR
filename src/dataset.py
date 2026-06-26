@@ -16,7 +16,7 @@ _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CANON = os.path.join(_REPO, "data", "processed", "hot3d_canonical")
 
 INPUT_DIM = 13
-POSE_DIM = 15
+POSE_DIM = 45   # tam finger axis-angle hedefi (eski: 15 PCA)
 
 
 def load_stats():
@@ -28,7 +28,9 @@ def load_stats():
 
 
 def _seq_ids(split):
-    sp = json.load(open(os.path.join(CANON, "split.json")))
+    # AURAXR_SPLIT ile alternatif split dosyasi (cross-dataset deneyleri icin)
+    fname = os.environ.get("AURAXR_SPLIT", "split.json")
+    sp = json.load(open(os.path.join(CANON, fname)))
     return set(sp["sequences"][split])
 
 
@@ -73,8 +75,8 @@ class GraspSegments(Dataset):
                 self.segments.append(dict(
                     feat=fseg,
                     cat=d["category_id"][m].astype(np.int64),
-                    target=d["finger_pca15"][m].astype(np.float32),
-                    aa45=d["finger_aa45"][m].astype(np.float32),
+                    target=d["finger_aa45"][m].astype(np.float32),   # aa45 hedef
+                    pca15=d["finger_pca15"][m].astype(np.float32),   # geriye-uyum (kullanilmaz)
                     fk_joints=d["fk_joints"][m].astype(np.float32),
                     betas=d["betas"][m].astype(np.float32),
                     wrist_t=d["wrist_world_t"][m].astype(np.float32),
@@ -94,7 +96,7 @@ class GraspSegments(Dataset):
         return self.segments[i]
 
 
-_PAD_KEYS = ["feat", "cat", "target", "aa45", "fk_joints", "betas",
+_PAD_KEYS = ["feat", "cat", "target", "fk_joints", "betas",
              "wrist_t", "wrist_q", "obj_t", "obj_q", "contact"]
 
 

@@ -50,7 +50,7 @@ def mpjpe_frames(pca, betas, wq, wt, gtj, idx, mano):
     """idx frame'leri icin per-frame MPJPE (mm)."""
     e = np.empty(len(idx))
     for n, i in enumerate(idx):
-        aa = mano.decode_pca(pca[i])
+        aa = pca[i]   # cikti zaten aa45 (decode yok)
         j = mano.fk(aa, betas[i], wq[i], wt[i], shaped=mano.shaped_cached(betas[i]))["joints"]
         e[n] = np.linalg.norm(j - gtj[i], axis=1).mean()
     return e * 1000.0
@@ -82,7 +82,7 @@ def sanity_viz(model, dev, mano, split, mean, std, object_name="mug_white"):
     for c, p in enumerate(picks):
         ax = fig.add_subplot(1, 4, c + 1, projection="3d")
         for pca, col in [(seg["target"][p], "tab:green"), (pred[p], "tab:red")]:
-            aa = mano.decode_pca(pca)
+            aa = pca   # aa45 (decode yok)
             V = mano.fk(aa, seg["betas"][p], seg["wrist_q"][p], seg["wrist_t"][p],
                         want_mesh=True)["verts"]
             ax.plot_trisurf(V[:, 0], V[:, 1], V[:, 2], triangles=mano.faces,
@@ -106,8 +106,11 @@ def main():
     mano = ManoRight()
     ck = torch.load(args.ckpt, map_location=dev, weights_only=False)
     mean, std = ck["mean"], ck["std"]
+    obj_size = ck["args"].get("obj_size", False)
+    feat_dim = 16 if obj_size else 13
     model = ControllerToHand(hidden=ck["args"]["hidden"], layers=ck["args"]["layers"],
-                             use_prev=not ck["args"].get("no_prev", False)).to(dev)
+                             use_prev=not ck["args"].get("no_prev", False),
+                             feat_dim=feat_dim, arch=ck["args"].get("arch", "lstm")).to(dev)
     model.load_state_dict(ck["model"])
 
     # train kategori-ortalama poz (baseline)
@@ -116,10 +119,10 @@ def main():
     for s in tr.segments:
         tr_pose.append(s["target"]); tr_cat.append(s["cat"])
     tr_pose = np.concatenate(tr_pose); tr_cat = np.concatenate(tr_cat)
-    cat_mean = {c: tr_pose[tr_cat == c].mean(0) for c in range(3)}
+    cat_mean = {c: tr_pose[tr_cat == c].mean(0) for c in range(4) if (tr_cat == c).any()}
     glob_mean = tr_pose.mean(0)
 
-    loader = DataLoader(GraspSegments(args.split, mean, std), batch_size=32,
+    loader = DataLoader(GraspSegments(args.split, mean, std, obj_size=obj_size), batch_size=32,
                         shuffle=False, collate_fn=collate)
     G = gather(model, loader, dev)
     N = len(G["tf"])
@@ -129,7 +132,7 @@ def main():
     # baseline pca dizileri
     copy_prev = G["target"].copy()
     copy_prev[1:] = G["target"][:-1]            # kaba (segment siniri yok; referans)
-    catmean_pred = np.stack([cat_mean[c] for c in G["cat"]])
+    catmean_pred = np.stack([cat_mean.get(c, glob_mean) for c in G["cat"]])
     globmean_pred = np.tile(glob_mean, (N, 1))
 
     methods = {
@@ -150,7 +153,7 @@ def main():
     # kategori kirilimi (model_free vs cat_mean)
     cats = G["cat"][idx]
     bycat = {}
-    for c in range(3):
+    for c in range(4):
         cm = cats == c
         if cm.sum() == 0:
             continue
@@ -161,7 +164,7 @@ def main():
 
     # smoothness: free-running vs GT (segment bazli)
     js_free, js_gt = [], []
-    te = GraspSegments(args.split, mean, std)
+    te = GraspSegments(args.split, mean, std, obj_size=obj_size)
     with torch.no_grad():
         for s in te.segments[:200]:
             feat = torch.as_tensor(s["feat"])[None].to(dev)
