@@ -1,0 +1,2273 @@
+{
+  "baseline(noprev)": {
+    "tag": "noprev",
+    "split": "test",
+    "n_frames": 8005,
+    "mpjpe_mm": 7.77,
+    "fingertip_mm": 15.79,
+    "cat_mean_baseline_mm": 8.01,
+    "gain_vs_static_mm": 0.25,
+    "jerk_free": 0.0431,
+    "jerk_gt": 0.0963,
+    "by_source": {
+      "HOT3D": {
+        "mpjpe": 7.8,
+        "n": 7470
+      },
+      "DexYCB": {
+        "mpjpe": 7.24,
+        "n": 535
+      }
+    },
+    "by_category": {
+      "hook": {
+        "mpjpe": 9.7,
+        "static": 8.99,
+        "gain": -0.71,
+        "n": 1873
+      },
+      "power": {
+        "mpjpe": 7.06,
+        "static": 8.04,
+        "gain": 0.98,
+        "n": 2325
+      },
+      "wide": {
+        "mpjpe": 6.92,
+        "static": 7.28,
+        "gain": 0.36,
+        "n": 2071
+      },
+      "pinch": {
+        "mpjpe": 7.64,
+        "static": 7.79,
+        "gain": 0.16,
+        "n": 1736
+      }
+    },
+    "by_object": {
+      "002_master_chef_can": {
+        "mpjpe": 7.28,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 39
+      },
+      "004_sugar_box": {
+        "mpjpe": 6.72,
+        "source": "DexYCB",
+        "category": "wide",
+        "n": 51
+      },
+      "005_tomato_soup_can": {
+        "mpjpe": 8.62,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 63
+      },
+      "006_mustard_bottle": {
+        "mpjpe": 6.84,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 53
+      },
+      "007_tuna_fish_can": {
+        "mpjpe": 7.74,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 54
+      },
+      "010_potted_meat_can": {
+        "mpjpe": 3.7,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 55
+      },
+      "019_pitcher_base": {
+        "mpjpe": 4.06,
+        "source": "DexYCB",
+        "category": "hook",
+        "n": 55
+      },
+      "035_power_drill": {
+        "mpjpe": 5.32,
+        "source": "DexYCB",
+        "category": "hook",
+        "n": 37
+      },
+      "037_scissors": {
+        "mpjpe": 8.56,
+        "source": "DexYCB",
+        "category": "pinch",
+        "n": 80
+      },
+      "052_extra_large_clamp": {
+        "mpjpe": 12.87,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 48
+      },
+      "aria_small": {
+        "mpjpe": 7.11,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 194
+      },
+      "bottle_bbq": {
+        "mpjpe": 5.85,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 90
+      },
+      "bottle_mustard": {
+        "mpjpe": 6.84,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 333
+      },
+      "bottle_ranch": {
+        "mpjpe": 5.23,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 250
+      },
+      "bowl": {
+        "mpjpe": 7.36,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 260
+      },
+      "can_parmesan": {
+        "mpjpe": 5.78,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 155
+      },
+      "can_soup": {
+        "mpjpe": 5.03,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 238
+      },
+      "can_tomato_sauce": {
+        "mpjpe": 6.57,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 268
+      },
+      "carton_milk": {
+        "mpjpe": 5.04,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 313
+      },
+      "carton_oj": {
+        "mpjpe": 6.26,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 45
+      },
+      "cellphone": {
+        "mpjpe": 9.33,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 54
+      },
+      "coffee_pot": {
+        "mpjpe": 9.87,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 94
+      },
+      "dino_toy": {
+        "mpjpe": 7.33,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 123
+      },
+      "flask": {
+        "mpjpe": 8.02,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 268
+      },
+      "food_vegetables": {
+        "mpjpe": 6.57,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 170
+      },
+      "food_waffles": {
+        "mpjpe": 9.36,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 148
+      },
+      "holder_black": {
+        "mpjpe": 6.79,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 346
+      },
+      "holder_gray": {
+        "mpjpe": 5.74,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 194
+      },
+      "keyboard": {
+        "mpjpe": 6.92,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 134
+      },
+      "mouse": {
+        "mpjpe": 6.85,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 970
+      },
+      "mug_patterned": {
+        "mpjpe": 8.77,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 155
+      },
+      "mug_white": {
+        "mpjpe": 7.71,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 389
+      },
+      "plate_bamboo": {
+        "mpjpe": 8.49,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 256
+      },
+      "potato_masher": {
+        "mpjpe": 9.38,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 530
+      },
+      "puzzle_toy": {
+        "mpjpe": 7.84,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 131
+      },
+      "spatula_red": {
+        "mpjpe": 12.2,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 613
+      },
+      "spoon_wooden": {
+        "mpjpe": 9.22,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 438
+      },
+      "vase": {
+        "mpjpe": 10.34,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 288
+      },
+      "whiteboard_eraser": {
+        "mpjpe": 5.3,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 23
+      }
+    }
+  },
+  "A: fk_loss": {
+    "tag": "fk",
+    "split": "test",
+    "n_frames": 8005,
+    "mpjpe_mm": 10.12,
+    "fingertip_mm": 20.91,
+    "cat_mean_baseline_mm": 8.01,
+    "gain_vs_static_mm": -2.11,
+    "jerk_free": 0.0287,
+    "jerk_gt": 0.0963,
+    "by_source": {
+      "HOT3D": {
+        "mpjpe": 10.17,
+        "n": 7470
+      },
+      "DexYCB": {
+        "mpjpe": 9.44,
+        "n": 535
+      }
+    },
+    "by_category": {
+      "hook": {
+        "mpjpe": 11.56,
+        "static": 8.99,
+        "gain": -2.57,
+        "n": 1873
+      },
+      "power": {
+        "mpjpe": 9.67,
+        "static": 8.04,
+        "gain": -1.62,
+        "n": 2325
+      },
+      "wide": {
+        "mpjpe": 9.39,
+        "static": 7.28,
+        "gain": -2.11,
+        "n": 2071
+      },
+      "pinch": {
+        "mpjpe": 10.05,
+        "static": 7.79,
+        "gain": -2.25,
+        "n": 1736
+      }
+    },
+    "by_object": {
+      "002_master_chef_can": {
+        "mpjpe": 5.74,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 39
+      },
+      "004_sugar_box": {
+        "mpjpe": 7.21,
+        "source": "DexYCB",
+        "category": "wide",
+        "n": 51
+      },
+      "005_tomato_soup_can": {
+        "mpjpe": 16.02,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 63
+      },
+      "006_mustard_bottle": {
+        "mpjpe": 7.65,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 53
+      },
+      "007_tuna_fish_can": {
+        "mpjpe": 12.38,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 54
+      },
+      "010_potted_meat_can": {
+        "mpjpe": 4.86,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 55
+      },
+      "019_pitcher_base": {
+        "mpjpe": 7.65,
+        "source": "DexYCB",
+        "category": "hook",
+        "n": 55
+      },
+      "035_power_drill": {
+        "mpjpe": 6.7,
+        "source": "DexYCB",
+        "category": "hook",
+        "n": 37
+      },
+      "037_scissors": {
+        "mpjpe": 11.71,
+        "source": "DexYCB",
+        "category": "pinch",
+        "n": 80
+      },
+      "052_extra_large_clamp": {
+        "mpjpe": 10.48,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 48
+      },
+      "aria_small": {
+        "mpjpe": 12.89,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 194
+      },
+      "bottle_bbq": {
+        "mpjpe": 7.12,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 90
+      },
+      "bottle_mustard": {
+        "mpjpe": 12.14,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 333
+      },
+      "bottle_ranch": {
+        "mpjpe": 6.41,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 250
+      },
+      "bowl": {
+        "mpjpe": 10.46,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 260
+      },
+      "can_parmesan": {
+        "mpjpe": 10.47,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 155
+      },
+      "can_soup": {
+        "mpjpe": 9.97,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 238
+      },
+      "can_tomato_sauce": {
+        "mpjpe": 7.42,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 268
+      },
+      "carton_milk": {
+        "mpjpe": 8.59,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 313
+      },
+      "carton_oj": {
+        "mpjpe": 8.3,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 45
+      },
+      "cellphone": {
+        "mpjpe": 14.72,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 54
+      },
+      "coffee_pot": {
+        "mpjpe": 15.78,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 94
+      },
+      "dino_toy": {
+        "mpjpe": 13.38,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 123
+      },
+      "flask": {
+        "mpjpe": 8.98,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 268
+      },
+      "food_vegetables": {
+        "mpjpe": 7.84,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 170
+      },
+      "food_waffles": {
+        "mpjpe": 8.79,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 148
+      },
+      "holder_black": {
+        "mpjpe": 10.03,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 346
+      },
+      "holder_gray": {
+        "mpjpe": 11.22,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 194
+      },
+      "keyboard": {
+        "mpjpe": 8.49,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 134
+      },
+      "mouse": {
+        "mpjpe": 9.09,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 970
+      },
+      "mug_patterned": {
+        "mpjpe": 14.54,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 155
+      },
+      "mug_white": {
+        "mpjpe": 8.59,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 389
+      },
+      "plate_bamboo": {
+        "mpjpe": 9.9,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 256
+      },
+      "potato_masher": {
+        "mpjpe": 11.94,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 530
+      },
+      "puzzle_toy": {
+        "mpjpe": 9.01,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 131
+      },
+      "spatula_red": {
+        "mpjpe": 12.35,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 613
+      },
+      "spoon_wooden": {
+        "mpjpe": 10.02,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 438
+      },
+      "vase": {
+        "mpjpe": 10.69,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 288
+      },
+      "whiteboard_eraser": {
+        "mpjpe": 7.09,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 23
+      }
+    }
+  },
+  "C: obj_size": {
+    "tag": "objsize",
+    "split": "test",
+    "n_frames": 8005,
+    "mpjpe_mm": 7.92,
+    "fingertip_mm": 16.05,
+    "cat_mean_baseline_mm": 8.01,
+    "gain_vs_static_mm": 0.09,
+    "jerk_free": 0.0159,
+    "jerk_gt": 0.0963,
+    "by_source": {
+      "HOT3D": {
+        "mpjpe": 7.95,
+        "n": 7470
+      },
+      "DexYCB": {
+        "mpjpe": 7.54,
+        "n": 535
+      }
+    },
+    "by_category": {
+      "hook": {
+        "mpjpe": 9.71,
+        "static": 8.99,
+        "gain": -0.72,
+        "n": 1873
+      },
+      "power": {
+        "mpjpe": 7.54,
+        "static": 8.04,
+        "gain": 0.51,
+        "n": 2325
+      },
+      "wide": {
+        "mpjpe": 6.96,
+        "static": 7.28,
+        "gain": 0.31,
+        "n": 2071
+      },
+      "pinch": {
+        "mpjpe": 7.67,
+        "static": 7.79,
+        "gain": 0.13,
+        "n": 1736
+      }
+    },
+    "by_object": {
+      "002_master_chef_can": {
+        "mpjpe": 7.42,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 39
+      },
+      "004_sugar_box": {
+        "mpjpe": 7.87,
+        "source": "DexYCB",
+        "category": "wide",
+        "n": 51
+      },
+      "005_tomato_soup_can": {
+        "mpjpe": 7.68,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 63
+      },
+      "006_mustard_bottle": {
+        "mpjpe": 7.57,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 53
+      },
+      "007_tuna_fish_can": {
+        "mpjpe": 5.56,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 54
+      },
+      "010_potted_meat_can": {
+        "mpjpe": 4.51,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 55
+      },
+      "019_pitcher_base": {
+        "mpjpe": 7.79,
+        "source": "DexYCB",
+        "category": "hook",
+        "n": 55
+      },
+      "035_power_drill": {
+        "mpjpe": 6.0,
+        "source": "DexYCB",
+        "category": "hook",
+        "n": 37
+      },
+      "037_scissors": {
+        "mpjpe": 8.45,
+        "source": "DexYCB",
+        "category": "pinch",
+        "n": 80
+      },
+      "052_extra_large_clamp": {
+        "mpjpe": 12.12,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 48
+      },
+      "aria_small": {
+        "mpjpe": 9.25,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 194
+      },
+      "bottle_bbq": {
+        "mpjpe": 5.81,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 90
+      },
+      "bottle_mustard": {
+        "mpjpe": 8.0,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 333
+      },
+      "bottle_ranch": {
+        "mpjpe": 5.56,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 250
+      },
+      "bowl": {
+        "mpjpe": 8.66,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 260
+      },
+      "can_parmesan": {
+        "mpjpe": 5.99,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 155
+      },
+      "can_soup": {
+        "mpjpe": 6.98,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 238
+      },
+      "can_tomato_sauce": {
+        "mpjpe": 6.16,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 268
+      },
+      "carton_milk": {
+        "mpjpe": 5.68,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 313
+      },
+      "carton_oj": {
+        "mpjpe": 5.98,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 45
+      },
+      "cellphone": {
+        "mpjpe": 10.93,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 54
+      },
+      "coffee_pot": {
+        "mpjpe": 13.11,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 94
+      },
+      "dino_toy": {
+        "mpjpe": 5.85,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 123
+      },
+      "flask": {
+        "mpjpe": 10.93,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 268
+      },
+      "food_vegetables": {
+        "mpjpe": 6.31,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 170
+      },
+      "food_waffles": {
+        "mpjpe": 8.04,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 148
+      },
+      "holder_black": {
+        "mpjpe": 6.38,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 346
+      },
+      "holder_gray": {
+        "mpjpe": 6.64,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 194
+      },
+      "keyboard": {
+        "mpjpe": 7.87,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 134
+      },
+      "mouse": {
+        "mpjpe": 7.13,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 970
+      },
+      "mug_patterned": {
+        "mpjpe": 8.3,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 155
+      },
+      "mug_white": {
+        "mpjpe": 8.32,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 389
+      },
+      "plate_bamboo": {
+        "mpjpe": 7.1,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 256
+      },
+      "potato_masher": {
+        "mpjpe": 9.36,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 530
+      },
+      "puzzle_toy": {
+        "mpjpe": 7.29,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 131
+      },
+      "spatula_red": {
+        "mpjpe": 11.12,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 613
+      },
+      "spoon_wooden": {
+        "mpjpe": 7.6,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 438
+      },
+      "vase": {
+        "mpjpe": 9.54,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 288
+      },
+      "whiteboard_eraser": {
+        "mpjpe": 5.8,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 23
+      }
+    }
+  },
+  "A+C: fk+obj_size": {
+    "tag": "fk_objsize",
+    "split": "test",
+    "n_frames": 8005,
+    "mpjpe_mm": 8.38,
+    "fingertip_mm": 17.11,
+    "cat_mean_baseline_mm": 8.01,
+    "gain_vs_static_mm": -0.37,
+    "jerk_free": 0.0152,
+    "jerk_gt": 0.0963,
+    "by_source": {
+      "HOT3D": {
+        "mpjpe": 8.43,
+        "n": 7470
+      },
+      "DexYCB": {
+        "mpjpe": 7.71,
+        "n": 535
+      }
+    },
+    "by_category": {
+      "hook": {
+        "mpjpe": 10.41,
+        "static": 8.99,
+        "gain": -1.42,
+        "n": 1873
+      },
+      "power": {
+        "mpjpe": 7.7,
+        "static": 8.04,
+        "gain": 0.35,
+        "n": 2325
+      },
+      "wide": {
+        "mpjpe": 7.24,
+        "static": 7.28,
+        "gain": 0.03,
+        "n": 2071
+      },
+      "pinch": {
+        "mpjpe": 8.46,
+        "static": 7.79,
+        "gain": -0.67,
+        "n": 1736
+      }
+    },
+    "by_object": {
+      "002_master_chef_can": {
+        "mpjpe": 9.07,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 39
+      },
+      "004_sugar_box": {
+        "mpjpe": 7.73,
+        "source": "DexYCB",
+        "category": "wide",
+        "n": 51
+      },
+      "005_tomato_soup_can": {
+        "mpjpe": 7.64,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 63
+      },
+      "006_mustard_bottle": {
+        "mpjpe": 7.12,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 53
+      },
+      "007_tuna_fish_can": {
+        "mpjpe": 6.58,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 54
+      },
+      "010_potted_meat_can": {
+        "mpjpe": 4.63,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 55
+      },
+      "019_pitcher_base": {
+        "mpjpe": 9.24,
+        "source": "DexYCB",
+        "category": "hook",
+        "n": 55
+      },
+      "035_power_drill": {
+        "mpjpe": 6.12,
+        "source": "DexYCB",
+        "category": "hook",
+        "n": 37
+      },
+      "037_scissors": {
+        "mpjpe": 7.9,
+        "source": "DexYCB",
+        "category": "pinch",
+        "n": 80
+      },
+      "052_extra_large_clamp": {
+        "mpjpe": 11.3,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 48
+      },
+      "aria_small": {
+        "mpjpe": 10.14,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 194
+      },
+      "bottle_bbq": {
+        "mpjpe": 5.66,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 90
+      },
+      "bottle_mustard": {
+        "mpjpe": 7.74,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 333
+      },
+      "bottle_ranch": {
+        "mpjpe": 5.15,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 250
+      },
+      "bowl": {
+        "mpjpe": 8.77,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 260
+      },
+      "can_parmesan": {
+        "mpjpe": 6.43,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 155
+      },
+      "can_soup": {
+        "mpjpe": 6.7,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 238
+      },
+      "can_tomato_sauce": {
+        "mpjpe": 5.93,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 268
+      },
+      "carton_milk": {
+        "mpjpe": 6.14,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 313
+      },
+      "carton_oj": {
+        "mpjpe": 5.59,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 45
+      },
+      "cellphone": {
+        "mpjpe": 10.54,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 54
+      },
+      "coffee_pot": {
+        "mpjpe": 12.25,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 94
+      },
+      "dino_toy": {
+        "mpjpe": 5.77,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 123
+      },
+      "flask": {
+        "mpjpe": 14.78,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 268
+      },
+      "food_vegetables": {
+        "mpjpe": 6.57,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 170
+      },
+      "food_waffles": {
+        "mpjpe": 8.67,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 148
+      },
+      "holder_black": {
+        "mpjpe": 6.73,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 346
+      },
+      "holder_gray": {
+        "mpjpe": 6.14,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 194
+      },
+      "keyboard": {
+        "mpjpe": 8.34,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 134
+      },
+      "mouse": {
+        "mpjpe": 8.44,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 970
+      },
+      "mug_patterned": {
+        "mpjpe": 7.76,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 155
+      },
+      "mug_white": {
+        "mpjpe": 8.66,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 389
+      },
+      "plate_bamboo": {
+        "mpjpe": 7.89,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 256
+      },
+      "potato_masher": {
+        "mpjpe": 10.08,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 530
+      },
+      "puzzle_toy": {
+        "mpjpe": 7.37,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 131
+      },
+      "spatula_red": {
+        "mpjpe": 12.56,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 613
+      },
+      "spoon_wooden": {
+        "mpjpe": 7.6,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 438
+      },
+      "vase": {
+        "mpjpe": 7.99,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 288
+      },
+      "whiteboard_eraser": {
+        "mpjpe": 5.56,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 23
+      }
+    }
+  },
+  "B: AR+sched_samp": {
+    "tag": "ss",
+    "split": "test",
+    "n_frames": 8005,
+    "mpjpe_mm": 8.2,
+    "fingertip_mm": 16.66,
+    "cat_mean_baseline_mm": 8.01,
+    "gain_vs_static_mm": -0.18,
+    "jerk_free": 0.0157,
+    "jerk_gt": 0.0963,
+    "by_source": {
+      "HOT3D": {
+        "mpjpe": 8.2,
+        "n": 7470
+      },
+      "DexYCB": {
+        "mpjpe": 8.14,
+        "n": 535
+      }
+    },
+    "by_category": {
+      "hook": {
+        "mpjpe": 9.4,
+        "static": 8.99,
+        "gain": -0.42,
+        "n": 1873
+      },
+      "power": {
+        "mpjpe": 7.92,
+        "static": 8.04,
+        "gain": 0.12,
+        "n": 2325
+      },
+      "wide": {
+        "mpjpe": 7.9,
+        "static": 7.28,
+        "gain": -0.62,
+        "n": 2071
+      },
+      "pinch": {
+        "mpjpe": 7.61,
+        "static": 7.79,
+        "gain": 0.18,
+        "n": 1736
+      }
+    },
+    "by_object": {
+      "002_master_chef_can": {
+        "mpjpe": 7.35,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 39
+      },
+      "004_sugar_box": {
+        "mpjpe": 6.93,
+        "source": "DexYCB",
+        "category": "wide",
+        "n": 51
+      },
+      "005_tomato_soup_can": {
+        "mpjpe": 8.11,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 63
+      },
+      "006_mustard_bottle": {
+        "mpjpe": 7.95,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 53
+      },
+      "007_tuna_fish_can": {
+        "mpjpe": 8.13,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 54
+      },
+      "010_potted_meat_can": {
+        "mpjpe": 4.9,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 55
+      },
+      "019_pitcher_base": {
+        "mpjpe": 7.51,
+        "source": "DexYCB",
+        "category": "hook",
+        "n": 55
+      },
+      "035_power_drill": {
+        "mpjpe": 7.1,
+        "source": "DexYCB",
+        "category": "hook",
+        "n": 37
+      },
+      "037_scissors": {
+        "mpjpe": 10.14,
+        "source": "DexYCB",
+        "category": "pinch",
+        "n": 80
+      },
+      "052_extra_large_clamp": {
+        "mpjpe": 12.2,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 48
+      },
+      "aria_small": {
+        "mpjpe": 9.4,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 194
+      },
+      "bottle_bbq": {
+        "mpjpe": 5.43,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 90
+      },
+      "bottle_mustard": {
+        "mpjpe": 7.21,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 333
+      },
+      "bottle_ranch": {
+        "mpjpe": 5.51,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 250
+      },
+      "bowl": {
+        "mpjpe": 8.64,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 260
+      },
+      "can_parmesan": {
+        "mpjpe": 6.7,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 155
+      },
+      "can_soup": {
+        "mpjpe": 6.3,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 238
+      },
+      "can_tomato_sauce": {
+        "mpjpe": 6.48,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 268
+      },
+      "carton_milk": {
+        "mpjpe": 7.95,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 313
+      },
+      "carton_oj": {
+        "mpjpe": 6.45,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 45
+      },
+      "cellphone": {
+        "mpjpe": 11.43,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 54
+      },
+      "coffee_pot": {
+        "mpjpe": 13.21,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 94
+      },
+      "dino_toy": {
+        "mpjpe": 8.04,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 123
+      },
+      "flask": {
+        "mpjpe": 11.54,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 268
+      },
+      "food_vegetables": {
+        "mpjpe": 7.23,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 170
+      },
+      "food_waffles": {
+        "mpjpe": 8.2,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 148
+      },
+      "holder_black": {
+        "mpjpe": 7.89,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 346
+      },
+      "holder_gray": {
+        "mpjpe": 7.79,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 194
+      },
+      "keyboard": {
+        "mpjpe": 7.95,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 134
+      },
+      "mouse": {
+        "mpjpe": 6.64,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 970
+      },
+      "mug_patterned": {
+        "mpjpe": 7.63,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 155
+      },
+      "mug_white": {
+        "mpjpe": 9.77,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 389
+      },
+      "plate_bamboo": {
+        "mpjpe": 8.03,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 256
+      },
+      "potato_masher": {
+        "mpjpe": 9.75,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 530
+      },
+      "puzzle_toy": {
+        "mpjpe": 7.97,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 131
+      },
+      "spatula_red": {
+        "mpjpe": 9.04,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 613
+      },
+      "spoon_wooden": {
+        "mpjpe": 8.04,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 438
+      },
+      "vase": {
+        "mpjpe": 11.38,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 288
+      },
+      "whiteboard_eraser": {
+        "mpjpe": 5.62,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 23
+      }
+    }
+  },
+  "arch: LSTM-ff": {
+    "tag": "arch_lstm",
+    "split": "test",
+    "n_frames": 8005,
+    "mpjpe_mm": 7.1,
+    "fingertip_mm": 14.42,
+    "cat_mean_baseline_mm": 8.01,
+    "gain_vs_static_mm": 0.92,
+    "jerk_free": 0.0439,
+    "jerk_gt": 0.0963,
+    "by_source": {
+      "HOT3D": {
+        "mpjpe": 7.12,
+        "n": 7470
+      },
+      "DexYCB": {
+        "mpjpe": 6.79,
+        "n": 535
+      }
+    },
+    "by_category": {
+      "hook": {
+        "mpjpe": 7.53,
+        "static": 8.99,
+        "gain": 1.46,
+        "n": 1873
+      },
+      "power": {
+        "mpjpe": 7.12,
+        "static": 8.04,
+        "gain": 0.93,
+        "n": 2325
+      },
+      "wide": {
+        "mpjpe": 6.42,
+        "static": 7.28,
+        "gain": 0.86,
+        "n": 2071
+      },
+      "pinch": {
+        "mpjpe": 7.41,
+        "static": 7.79,
+        "gain": 0.39,
+        "n": 1736
+      }
+    },
+    "by_object": {
+      "002_master_chef_can": {
+        "mpjpe": 5.37,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 39
+      },
+      "004_sugar_box": {
+        "mpjpe": 5.77,
+        "source": "DexYCB",
+        "category": "wide",
+        "n": 51
+      },
+      "005_tomato_soup_can": {
+        "mpjpe": 7.78,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 63
+      },
+      "006_mustard_bottle": {
+        "mpjpe": 8.6,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 53
+      },
+      "007_tuna_fish_can": {
+        "mpjpe": 5.06,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 54
+      },
+      "010_potted_meat_can": {
+        "mpjpe": 4.6,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 55
+      },
+      "019_pitcher_base": {
+        "mpjpe": 3.79,
+        "source": "DexYCB",
+        "category": "hook",
+        "n": 55
+      },
+      "035_power_drill": {
+        "mpjpe": 5.56,
+        "source": "DexYCB",
+        "category": "hook",
+        "n": 37
+      },
+      "037_scissors": {
+        "mpjpe": 9.21,
+        "source": "DexYCB",
+        "category": "pinch",
+        "n": 80
+      },
+      "052_extra_large_clamp": {
+        "mpjpe": 10.54,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 48
+      },
+      "aria_small": {
+        "mpjpe": 7.12,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 194
+      },
+      "bottle_bbq": {
+        "mpjpe": 5.77,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 90
+      },
+      "bottle_mustard": {
+        "mpjpe": 7.01,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 333
+      },
+      "bottle_ranch": {
+        "mpjpe": 5.23,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 250
+      },
+      "bowl": {
+        "mpjpe": 7.99,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 260
+      },
+      "can_parmesan": {
+        "mpjpe": 6.87,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 155
+      },
+      "can_soup": {
+        "mpjpe": 5.98,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 238
+      },
+      "can_tomato_sauce": {
+        "mpjpe": 6.45,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 268
+      },
+      "carton_milk": {
+        "mpjpe": 4.98,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 313
+      },
+      "carton_oj": {
+        "mpjpe": 5.5,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 45
+      },
+      "cellphone": {
+        "mpjpe": 9.08,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 54
+      },
+      "coffee_pot": {
+        "mpjpe": 10.87,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 94
+      },
+      "dino_toy": {
+        "mpjpe": 6.0,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 123
+      },
+      "flask": {
+        "mpjpe": 8.36,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 268
+      },
+      "food_vegetables": {
+        "mpjpe": 5.77,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 170
+      },
+      "food_waffles": {
+        "mpjpe": 7.89,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 148
+      },
+      "holder_black": {
+        "mpjpe": 6.57,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 346
+      },
+      "holder_gray": {
+        "mpjpe": 5.72,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 194
+      },
+      "keyboard": {
+        "mpjpe": 7.56,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 134
+      },
+      "mouse": {
+        "mpjpe": 6.8,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 970
+      },
+      "mug_patterned": {
+        "mpjpe": 9.11,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 155
+      },
+      "mug_white": {
+        "mpjpe": 8.09,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 389
+      },
+      "plate_bamboo": {
+        "mpjpe": 6.25,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 256
+      },
+      "potato_masher": {
+        "mpjpe": 8.57,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 530
+      },
+      "puzzle_toy": {
+        "mpjpe": 6.55,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 131
+      },
+      "spatula_red": {
+        "mpjpe": 5.83,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 613
+      },
+      "spoon_wooden": {
+        "mpjpe": 8.34,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 438
+      },
+      "vase": {
+        "mpjpe": 10.42,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 288
+      },
+      "whiteboard_eraser": {
+        "mpjpe": 5.18,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 23
+      }
+    }
+  },
+  "arch: TCN": {
+    "tag": "arch_tcn",
+    "split": "test",
+    "n_frames": 8005,
+    "mpjpe_mm": 7.28,
+    "fingertip_mm": 14.63,
+    "cat_mean_baseline_mm": 8.01,
+    "gain_vs_static_mm": 0.73,
+    "jerk_free": 0.1711,
+    "jerk_gt": 0.0963,
+    "by_source": {
+      "HOT3D": {
+        "mpjpe": 7.28,
+        "n": 7470
+      },
+      "DexYCB": {
+        "mpjpe": 7.33,
+        "n": 535
+      }
+    },
+    "by_category": {
+      "hook": {
+        "mpjpe": 7.87,
+        "static": 8.99,
+        "gain": 1.11,
+        "n": 1873
+      },
+      "power": {
+        "mpjpe": 7.2,
+        "static": 8.04,
+        "gain": 0.84,
+        "n": 2325
+      },
+      "wide": {
+        "mpjpe": 6.59,
+        "static": 7.28,
+        "gain": 0.69,
+        "n": 2071
+      },
+      "pinch": {
+        "mpjpe": 7.58,
+        "static": 7.79,
+        "gain": 0.22,
+        "n": 1736
+      }
+    },
+    "by_object": {
+      "002_master_chef_can": {
+        "mpjpe": 6.49,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 39
+      },
+      "004_sugar_box": {
+        "mpjpe": 7.67,
+        "source": "DexYCB",
+        "category": "wide",
+        "n": 51
+      },
+      "005_tomato_soup_can": {
+        "mpjpe": 7.18,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 63
+      },
+      "006_mustard_bottle": {
+        "mpjpe": 8.92,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 53
+      },
+      "007_tuna_fish_can": {
+        "mpjpe": 7.2,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 54
+      },
+      "010_potted_meat_can": {
+        "mpjpe": 4.43,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 55
+      },
+      "019_pitcher_base": {
+        "mpjpe": 4.39,
+        "source": "DexYCB",
+        "category": "hook",
+        "n": 55
+      },
+      "035_power_drill": {
+        "mpjpe": 5.65,
+        "source": "DexYCB",
+        "category": "hook",
+        "n": 37
+      },
+      "037_scissors": {
+        "mpjpe": 9.23,
+        "source": "DexYCB",
+        "category": "pinch",
+        "n": 80
+      },
+      "052_extra_large_clamp": {
+        "mpjpe": 11.06,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 48
+      },
+      "aria_small": {
+        "mpjpe": 7.63,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 194
+      },
+      "bottle_bbq": {
+        "mpjpe": 6.22,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 90
+      },
+      "bottle_mustard": {
+        "mpjpe": 6.76,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 333
+      },
+      "bottle_ranch": {
+        "mpjpe": 5.49,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 250
+      },
+      "bowl": {
+        "mpjpe": 8.02,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 260
+      },
+      "can_parmesan": {
+        "mpjpe": 7.81,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 155
+      },
+      "can_soup": {
+        "mpjpe": 5.88,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 238
+      },
+      "can_tomato_sauce": {
+        "mpjpe": 6.35,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 268
+      },
+      "carton_milk": {
+        "mpjpe": 5.57,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 313
+      },
+      "carton_oj": {
+        "mpjpe": 6.12,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 45
+      },
+      "cellphone": {
+        "mpjpe": 8.44,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 54
+      },
+      "coffee_pot": {
+        "mpjpe": 9.22,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 94
+      },
+      "dino_toy": {
+        "mpjpe": 5.95,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 123
+      },
+      "flask": {
+        "mpjpe": 10.18,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 268
+      },
+      "food_vegetables": {
+        "mpjpe": 5.77,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 170
+      },
+      "food_waffles": {
+        "mpjpe": 6.92,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 148
+      },
+      "holder_black": {
+        "mpjpe": 6.52,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 346
+      },
+      "holder_gray": {
+        "mpjpe": 6.1,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 194
+      },
+      "keyboard": {
+        "mpjpe": 8.06,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 134
+      },
+      "mouse": {
+        "mpjpe": 7.0,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 970
+      },
+      "mug_patterned": {
+        "mpjpe": 9.39,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 155
+      },
+      "mug_white": {
+        "mpjpe": 8.66,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 389
+      },
+      "plate_bamboo": {
+        "mpjpe": 6.53,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 256
+      },
+      "potato_masher": {
+        "mpjpe": 9.03,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 530
+      },
+      "puzzle_toy": {
+        "mpjpe": 6.33,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 131
+      },
+      "spatula_red": {
+        "mpjpe": 6.23,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 613
+      },
+      "spoon_wooden": {
+        "mpjpe": 8.42,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 438
+      },
+      "vase": {
+        "mpjpe": 8.48,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 288
+      },
+      "whiteboard_eraser": {
+        "mpjpe": 5.17,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 23
+      }
+    }
+  },
+  "arch: Transformer": {
+    "tag": "arch_transformer",
+    "split": "test",
+    "n_frames": 8005,
+    "mpjpe_mm": 7.0,
+    "fingertip_mm": 14.17,
+    "cat_mean_baseline_mm": 8.01,
+    "gain_vs_static_mm": 1.01,
+    "jerk_free": 0.0336,
+    "jerk_gt": 0.0963,
+    "by_source": {
+      "HOT3D": {
+        "mpjpe": 6.97,
+        "n": 7470
+      },
+      "DexYCB": {
+        "mpjpe": 7.35,
+        "n": 535
+      }
+    },
+    "by_category": {
+      "hook": {
+        "mpjpe": 8.06,
+        "static": 8.99,
+        "gain": 0.93,
+        "n": 1873
+      },
+      "power": {
+        "mpjpe": 6.66,
+        "static": 8.04,
+        "gain": 1.38,
+        "n": 2325
+      },
+      "wide": {
+        "mpjpe": 6.4,
+        "static": 7.28,
+        "gain": 0.88,
+        "n": 2071
+      },
+      "pinch": {
+        "mpjpe": 7.02,
+        "static": 7.79,
+        "gain": 0.78,
+        "n": 1736
+      }
+    },
+    "by_object": {
+      "002_master_chef_can": {
+        "mpjpe": 7.31,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 39
+      },
+      "004_sugar_box": {
+        "mpjpe": 5.66,
+        "source": "DexYCB",
+        "category": "wide",
+        "n": 51
+      },
+      "005_tomato_soup_can": {
+        "mpjpe": 8.66,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 63
+      },
+      "006_mustard_bottle": {
+        "mpjpe": 7.36,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 53
+      },
+      "007_tuna_fish_can": {
+        "mpjpe": 8.12,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 54
+      },
+      "010_potted_meat_can": {
+        "mpjpe": 4.33,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 55
+      },
+      "019_pitcher_base": {
+        "mpjpe": 4.27,
+        "source": "DexYCB",
+        "category": "hook",
+        "n": 55
+      },
+      "035_power_drill": {
+        "mpjpe": 6.65,
+        "source": "DexYCB",
+        "category": "hook",
+        "n": 37
+      },
+      "037_scissors": {
+        "mpjpe": 8.89,
+        "source": "DexYCB",
+        "category": "pinch",
+        "n": 80
+      },
+      "052_extra_large_clamp": {
+        "mpjpe": 11.6,
+        "source": "DexYCB",
+        "category": "power",
+        "n": 48
+      },
+      "aria_small": {
+        "mpjpe": 6.57,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 194
+      },
+      "bottle_bbq": {
+        "mpjpe": 5.38,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 90
+      },
+      "bottle_mustard": {
+        "mpjpe": 6.61,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 333
+      },
+      "bottle_ranch": {
+        "mpjpe": 5.41,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 250
+      },
+      "bowl": {
+        "mpjpe": 7.52,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 260
+      },
+      "can_parmesan": {
+        "mpjpe": 6.52,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 155
+      },
+      "can_soup": {
+        "mpjpe": 5.94,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 238
+      },
+      "can_tomato_sauce": {
+        "mpjpe": 5.75,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 268
+      },
+      "carton_milk": {
+        "mpjpe": 4.86,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 313
+      },
+      "carton_oj": {
+        "mpjpe": 6.8,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 45
+      },
+      "cellphone": {
+        "mpjpe": 10.57,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 54
+      },
+      "coffee_pot": {
+        "mpjpe": 8.7,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 94
+      },
+      "dino_toy": {
+        "mpjpe": 6.98,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 123
+      },
+      "flask": {
+        "mpjpe": 6.0,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 268
+      },
+      "food_vegetables": {
+        "mpjpe": 5.94,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 170
+      },
+      "food_waffles": {
+        "mpjpe": 8.22,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 148
+      },
+      "holder_black": {
+        "mpjpe": 6.78,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 346
+      },
+      "holder_gray": {
+        "mpjpe": 5.77,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 194
+      },
+      "keyboard": {
+        "mpjpe": 7.37,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 134
+      },
+      "mouse": {
+        "mpjpe": 6.1,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 970
+      },
+      "mug_patterned": {
+        "mpjpe": 7.98,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 155
+      },
+      "mug_white": {
+        "mpjpe": 8.61,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 389
+      },
+      "plate_bamboo": {
+        "mpjpe": 5.91,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 256
+      },
+      "potato_masher": {
+        "mpjpe": 8.85,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 530
+      },
+      "puzzle_toy": {
+        "mpjpe": 6.79,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 131
+      },
+      "spatula_red": {
+        "mpjpe": 7.37,
+        "source": "HOT3D",
+        "category": "hook",
+        "n": 613
+      },
+      "spoon_wooden": {
+        "mpjpe": 8.46,
+        "source": "HOT3D",
+        "category": "pinch",
+        "n": 438
+      },
+      "vase": {
+        "mpjpe": 8.93,
+        "source": "HOT3D",
+        "category": "power",
+        "n": 288
+      },
+      "whiteboard_eraser": {
+        "mpjpe": 4.03,
+        "source": "HOT3D",
+        "category": "wide",
+        "n": 23
+      }
+    }
+  },
+  "baseline: cat_mean": {
+    "mpjpe_mm": 8.01,
+    "fingertip_mm": null,
+    "gain_vs_static_mm": 0.0,
+    "jerk_free": null,
+    "by_category": {}
+  }
+}

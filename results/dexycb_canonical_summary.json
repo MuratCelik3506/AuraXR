@@ -1,0 +1,37 @@
+{
+  "total_sessions": 984,
+  "usable_sessions": 480,
+  "usable_frames": 29043,
+  "detected_grasp_segments": 576,
+  "category_counts": {
+    "power": 10831,
+    "wide": 10711,
+    "pinch": 3358,
+    "hook": 4143
+  },
+  "object_counts": {
+    "002_master_chef_can": 25,
+    "003_cracker_box": 25,
+    "004_sugar_box": 24,
+    "005_tomato_soup_can": 25,
+    "006_mustard_bottle": 25,
+    "007_tuna_fish_can": 26,
+    "008_pudding_box": 23,
+    "009_gelatin_box": 27,
+    "010_potted_meat_can": 23,
+    "011_banana": 21,
+    "019_pitcher_base": 25,
+    "021_bleach_cleanser": 23,
+    "024_bowl": 25,
+    "025_mug": 21,
+    "035_power_drill": 23,
+    "036_wood_block": 26,
+    "037_scissors": 25,
+    "040_large_marker": 19,
+    "052_extra_large_clamp": 25,
+    "061_foam_brick": 24
+  },
+  "skipped_no_cat": 0,
+  "skipped_no_right": 491,
+  "nan_outlier": 0
+}

@@ -1,0 +1,165 @@
+{
+  "tag": "cross_h2d",
+  "split": "test",
+  "n_frames": 29043,
+  "mpjpe_mm": 9.16,
+  "fingertip_mm": 18.5,
+  "cat_mean_baseline_mm": 8.6,
+  "gain_vs_static_mm": -0.56,
+  "jerk_free": 0.0403,
+  "jerk_gt": 0.2775,
+  "by_source": {
+    "DexYCB": {
+      "mpjpe": 9.16,
+      "n": 29043
+    }
+  },
+  "by_category": {
+    "hook": {
+      "mpjpe": 9.93,
+      "static": 10.07,
+      "gain": 0.14,
+      "n": 4143
+    },
+    "power": {
+      "mpjpe": 9.23,
+      "static": 8.52,
+      "gain": -0.7,
+      "n": 10831
+    },
+    "wide": {
+      "mpjpe": 9.09,
+      "static": 8.6,
+      "gain": -0.49,
+      "n": 10711
+    },
+    "pinch": {
+      "mpjpe": 8.16,
+      "static": 7.03,
+      "gain": -1.14,
+      "n": 3358
+    }
+  },
+  "by_object": {
+    "002_master_chef_can": {
+      "mpjpe": 12.9,
+      "source": "DexYCB",
+      "category": "power",
+      "n": 1679
+    },
+    "003_cracker_box": {
+      "mpjpe": 9.17,
+      "source": "DexYCB",
+      "category": "wide",
+      "n": 1654
+    },
+    "004_sugar_box": {
+      "mpjpe": 7.75,
+      "source": "DexYCB",
+      "category": "wide",
+      "n": 1621
+    },
+    "005_tomato_soup_can": {
+      "mpjpe": 8.18,
+      "source": "DexYCB",
+      "category": "power",
+      "n": 1401
+    },
+    "006_mustard_bottle": {
+      "mpjpe": 7.99,
+      "source": "DexYCB",
+      "category": "power",
+      "n": 1660
+    },
+    "007_tuna_fish_can": {
+      "mpjpe": 8.64,
+      "source": "DexYCB",
+      "category": "power",
+      "n": 1517
+    },
+    "008_pudding_box": {
+      "mpjpe": 8.64,
+      "source": "DexYCB",
+      "category": "wide",
+      "n": 1287
+    },
+    "009_gelatin_box": {
+      "mpjpe": 7.69,
+      "source": "DexYCB",
+      "category": "wide",
+      "n": 1617
+    },
+    "010_potted_meat_can": {
+      "mpjpe": 8.53,
+      "source": "DexYCB",
+      "category": "power",
+      "n": 1527
+    },
+    "011_banana": {
+      "mpjpe": 8.65,
+      "source": "DexYCB",
+      "category": "pinch",
+      "n": 1249
+    },
+    "019_pitcher_base": {
+      "mpjpe": 12.98,
+      "source": "DexYCB",
+      "category": "hook",
+      "n": 1636
+    },
+    "021_bleach_cleanser": {
+      "mpjpe": 8.51,
+      "source": "DexYCB",
+      "category": "power",
+      "n": 1553
+    },
+    "024_bowl": {
+      "mpjpe": 13.16,
+      "source": "DexYCB",
+      "category": "wide",
+      "n": 1589
+    },
+    "025_mug": {
+      "mpjpe": 7.93,
+      "source": "DexYCB",
+      "category": "hook",
+      "n": 1280
+    },
+    "035_power_drill": {
+      "mpjpe": 7.96,
+      "source": "DexYCB",
+      "category": "hook",
+      "n": 1227
+    },
+    "036_wood_block": {
+      "mpjpe": 10.0,
+      "source": "DexYCB",
+      "category": "wide",
+      "n": 1642
+    },
+    "037_scissors": {
+      "mpjpe": 8.32,
+      "source": "DexYCB",
+      "category": "pinch",
+      "n": 1436
+    },
+    "040_large_marker": {
+      "mpjpe": 6.92,
+      "source": "DexYCB",
+      "category": "pinch",
+      "n": 673
+    },
+    "052_extra_large_clamp": {
+      "mpjpe": 9.5,
+      "source": "DexYCB",
+      "category": "power",
+      "n": 1494
+    },
+    "061_foam_brick": {
+      "mpjpe": 6.78,
+      "source": "DexYCB",
+      "category": "wide",
+      "n": 1301
+    }
+  }
+}
