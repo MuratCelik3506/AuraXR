@@ -180,30 +180,28 @@ Temporal modelin HOT3D üzerinde ince ayarı (Phase 2) yalnızca 14 epoch sürd�
 
 ---
 
-### B4. Augmentasyon Hiç Uygulanmadı
+### B4. Augmentasyon Etkisi Ölçülmedi
 
-**Ne oluyor, neden yanlış?**
+**Ne oluyor, neden önemli?**
 
-Veri çeşitlendirme (augmentasyon) makine öğrenmesinde modelin farklı koşullara genellemesini sağlayan temel bir teknik. Tezde 7 farklı augmentasyon yöntemi planlanmış ama hiçbiri implement edilmemiş.
+Augmentasyon implement edilmiş ve eğitimde aktif olarak kullanılıyor: `src/preprocessing/augment.py` içinde yaw rotasyonu (±180°, Z ekseni), point cloud jitter (σ=3mm) ve `rel_vel` dönüşümü mevcut; Phase 1 OakInk eğitimi `augment=True` ile çalışıyor.
 
-Özellikle HOT3D'nin 33 objeyle sınırlı olduğu düşünüldüğünde augmentasyon kritik — az sayıda objeyi farklı açılardan, farklı hızlarda göstererek modelin daha iyi genellemesi sağlanabilir.
+Eksik olan şu: **augmentasyonun modele gerçekten katkı sağlayıp sağlamadığı hiç ölçülmemiş.** "Augmentasyon var" demek yeterli değil — jüri "ne kadar faydalı?" diye soracak.
 
-**Çözüm Planı — Sırayla Uygula:**
+Özellikle HOT3D'nin 33 objeyle sınırlı olduğu düşünüldüğünde augmentasyonun katkısını kanıtlamak kritik.
 
-**1. Yaw augmentasyon (en kolay, en faydalı, ~1 gün):**
-- Her HOT3D sekansını Z ekseni etrafında rastgele ±45° döndür.
-- Bu, modelin "bardağa her yönden yaklaşmayı" öğrenmesini sağlar.
-- Nasıl: `rel_pos` ve `rel_rot6d`'yi yaw rotation matrix ile döndür, `rel_vel`'i de dönüştür.
+**Çözüm Planı:**
 
-**2. Bilek hız gürültüsü (~2 saat):**
-- `rel_vel`'e σ=0.02 m/s Gaussian gürültü ekle.
-- Modelin hız sinyalindeki küçük bozulmalara karşı dayanıklı hale gelmesini sağlar.
+**1. Augmentasyon ablation'ı (~yarım gün):**
+- `augment=False` ile modeli yeniden eğit (sadece Phase 1 veya Phase 2, tam eğitim gerekmez).
+- Geodesic error ve contact ratio'yu karşılaştır.
+- Sonuç: "Augmentasyon geodesic error'ı X°'den Y°'ye düşürüyor" — katkı kanıtlanmış olur.
 
-**3. Obje konumu jitter (~2 saat):**
-- `rel_pos`'a ±5mm Gaussian gürültü ekle.
-- Gerçek kullanımda obje kesin konumu bilinmeyeceği için.
+**2. HOT3D Phase 2'de augmentasyon kontrol et (~1 saat):**
+- `dataset_hot3d.py` içinde `augment` flag'inin Phase 2 eğitiminde de aktif olduğunu doğrula.
+- Temporal sekanslar için yaw augmentasyonu tüm frame'lere tutarlı uygulanmalı (zaten `augment_frame_feat` bunu yapıyor, ancak kullanımı doğrula).
 
-Bu üç augmentasyon birbiriyle birleştirilerek eğitim setini ~3-4 kat çeşitlendirilebilir.
+Bu ablation sonucu tezde "Veri Artırma" alt başlığı altında raporlanabilir.
 
 ---
 
@@ -384,7 +382,7 @@ Kalan zamanı verimli kullanmak için öncelik sırası:
 | 2 | MLP-BBox baseline çalıştır | 1 gün | Geometri katkısını kanıtlar |
 | 3 | OakInk object-level split düzelt + yeniden eğit | 1 gün | Metodolojik hatayı düzeltir |
 | 4 | Contact loss redesign (threshold küçült + ağırlık artır) | 1 gün | En kritik metrik iyileşmesi |
-| 5 | Yaw augmentasyon ekle | 1 gün | Genelleme iyileşmesi |
+| 5 | Augmentasyon ablation çalıştır (var, etkisi ölçülmemiş) | yarım gün | Augmentasyon katkısını kanıtlar |
 | 6 | Statik görselleştirme üret | 1 gün | Jüriye kanıt |
 | 7 | Latency benchmark çalıştır | 2 saat | "Gerçek zamanlı" iddiasını doğrular |
 | 8 | Phase 2 uzun eğit (50 epoch) | 4 saat | Temporal kalite iyileşmesi |
