@@ -24,14 +24,14 @@ Modelin tek bir çıkış modu var: "şu an parmaklar nerede olmalı?" sorusunu 
 
 **Çözüm Planı:**
 
-Kısa vadeli (hızlı düzeltme):
-1. Unity tarafında blend başlangıç mesafesini 10cm'den 4cm'e çek. Modelin etkisi sadece çok yakında başlasın, kullanıcı farkı daha az hisseder.
-2. Blend formülünü güncelle: mevcut `smoothstep(10cm, 2cm)` yerine `smoothstep(4cm, 1cm)` kullan. Kullanıcı objeye neredeyse değdiğinde model devreye girsin.
+Kısa vadeli (**runtime mitigation — bilimsel model problemini çözmez, tezde böyle etiketle**):
+1. Unity tarafında blend başlangıç mesafesini 10cm'den 4cm'e çek. Modelin etkisi sadece çok yakında başlasın.
+2. Blend formülünü güncelle: `smoothstep(10cm, 2cm)` yerine `smoothstep(4cm, 1cm)`.
 
 Orta vadeli (doğru mimari düzeltme):
-1. Modele `dist` (bilek-obje mesafesi) değerini explicit bir "faz sinyali" olarak ver. Bu zaten `frame_feat` içinde var ama decoder onu yeterince kullanmıyor.
-2. Decoder'ı ikiye böl: `dist > 5cm` iken "açık el pozu" çıkışı, `dist <= 5cm` iken "grasp pozu" çıkışı. Aralarında yumuşak geçiş (lerp).
-3. Eğitim sırasında yaklaşım framelerini (contact_flag=0) ve temas framelerini (contact_flag=1) ayrı ayrı ağırlıklandır; modelin faz ayrımını görmesini sağla.
+1. Modele `dist` (bilek-obje mesafesi) değerini sürekli bir faz sinyali olarak ver. Keskin iki decoder yerine decoder'a sürekli bir `p = smoothstep(d_far, d_near, dist)` skaleri ver; model hem yaklaşım hem temas bağlamını aynı ağırlıklarla öğrensin, eşik çevresinde süreksizlik olmaz.
+2. Alternatif: model sadece "grasp residual" üretsin, yaklaşımda el gerçek tracker pozisyonunda açık kalsın, sadece temas anında model devreye girsin.
+3. Eğitim sırasında yaklaşım framelerini (contact_flag=0) ve temas framelerini (contact_flag=1) ayrı ayrı ağırlıklandır.
 
 ---
 
@@ -51,13 +51,14 @@ CVAE modeli eğitirken "latent space ne kadar çeşitli olsun?" diye bir paramet
 
 **Çözüm Planı:**
 
-Kısa vadeli:
-1. `kl_weight`'i 0.01'den 0.1'e çıkar. Bu tek değişiklik diversity'yi artırabilir.
-2. Diversity score'u training sırasında loglayarak takip et. Hedef: K=5 için diversity > 0.3 (şu an 0.05).
+Kısa vadeli (sweep — tek değer deneme değil):
+1. `kl_weight ∈ {0.001, 0.01, 0.05, 0.1}` için ayrı çalıştır. KL weight'i doğrudan 0.1'e çıkarmak posterior collapse'ı kötüleştirebilir; decoder latent değişkeni görmezden gelmeye başlayabilir.
+2. Her çalıştırmada `mu` ve `logvar` dağılımını izle, her latent boyutun aktif kullanımını ölç.
+3. Diversity artarken reconstruction error ve joint-limit violation da raporla. Sadece diversity'yi artırmak kolaydır — rastgele ve kötü pozlar da yüksek diversity üretir.
 
 Orta vadeli:
-1. Eğer KL weight artışı diversity'yi yeterince artırmazsa, CVAE'yi kaldırıp yerine **basit deterministik decoder** koy. Bunu ablation olarak da yayınla: "CVAE fazladan karmaşıklık katıyor ama fayda sağlamıyor."
-2. Alternatif: CVAE yerine farklı obje görüş açılarına karşılık gelen birkaç sabit latent vektör öğren (mixture of experts tarzı).
+1. **Oracle-best-of-K karşılaştırması yap:** Deterministik decoder / CVAE mean (`z=0`) / CVAE rastgele K / CVAE oracle-K (ground truth'a en yakın aday) / CVAE quality-selected-K. Oracle bile K=1'i geçemiyorsa sorun seçim mekanizmasında değil, adayların çeşitlilik üretmemesindedir.
+2. Eğer sweep sonrası diversity hâlâ yetersizse, CVAE'yi kaldırıp **basit deterministik decoder** koy. Bunu ablation olarak yayınla: "CVAE fazladan karmaşıklık katıyor ama fayda sağlamıyor."
 
 ---
 
@@ -75,19 +76,30 @@ Jüri şunu soracak: "PointNet yerine basit bir kutu (bounding box) kullansaydı
 
 **Çözüm Planı — Öncelik Sırasıyla:**
 
-**1. SingleFrame Baseline (en önemli, ~1 gün):**
-- Mevcut modeli al, sadece `T=1` ile çalıştır (GRU'yu devre dışı bırak, son frame'i kullan).
-- HOT3D test üzerinde aynı metrikleri hesapla.
-- Sonuç: "GRU ile T=16 kullanmak, T=1'e göre jitter score'u X'ten Y'ye düşürüyor" — bu cümle tezin temporal katkısını kanıtlar.
+**1. Temporal Baseline (en önemli, ~1 gün):**
 
-**2. MLP-BBox Baseline (~1 gün):**
-- PointNet encoder yerine objenin bounding box boyutları (3 sayı: en, boy, derinlik) veren basit MLP koy.
-- OakInk test üzerinde geodesic error karşılaştır.
-- Sonuç: "PointNet, BBox'a göre geodesic error'ı X° düşürüyor" — geometri encoding'in katkısı kanıtlanmış olur.
+Sadece T=1 vs T=16 karşılaştırmak yeterli değil — T=1 ile GRU hâlâ tek frame'i nonlinear encoder gibi işleyebilir. İki farklı soruyu ayırarak üç karşılaştırma yapılmalı:
+
+- **SingleFrame-MLP:** Son frame → MLP → decoder (GRU tamamen yok)
+- **GRU-T1:** Tek frame → GRU → decoder
+- **GRU-T16:** 16 frame → GRU → decoder (mevcut model)
+
+Bu şekilde "GRU mimarisi faydalı mı?" ve "geçmiş frame'ler faydalı mı?" soruları ayrışır.
+
+Yalnızca jitter score ile ölçme; temporal başarıyı şu metriklerle birlikte raporla: pose error, velocity error, contact stability. Çünkü aşırı düzleştirilmiş bir el düşük jitter üretebilir ama hareketi takip etmeyebilir.
+
+**2. Geometri Encoding Baseline (~1 gün):**
+
+Üç seviyeli karşılaştırma jüriyi daha ikna eder:
+- Pose only (obje bilgisi yok)
+- Pose + bbox boyutları (en, boy, derinlik + aspect ratio)
+- Pose + PointNet feature (mevcut model)
+
+Sadece "bbox vs PointNet" yerine bu sıralama, her adımın katkısını gösterir.
 
 **3. Deterministik Decoder Baseline (~2 saat):**
-- Mevcut modeli al, CVAE encoder'ı devre dışı bırak, `z=zeros` sabit tut.
-- Metrikleri karşılaştır. Büyük ihtimalle fark çok az çıkacak — bu zaten Unity export'un yaptığı şey.
+
+Zaten Unity export'un yaptığı şey. Karşılaştırmayı A2'deki oracle-K tablosuyla birleştir.
 
 **4. Self-Attention Ablation (~1 gün):**
 - JointSelfAttention yerine per-joint bağımsız MLP koy (eklemler birbirini görmüyor).
@@ -117,28 +129,37 @@ Buna istatistikte "Goodhart's Law" deniyor: ölçüt hedefe dönüşünce, ölç
 
 **Neden böyle oluyor?**
 
-Contact loss şu an şöyle çalışıyor: parmak ucu objenin yüzeyinden 15mm'den uzaksa ceza ver, yakınsa ceza verme. Ama 15mm büyük bir tolerans — model parmağı 14mm uzakta tutarak cezadan kaçınabiliyor ve bu "temas sayılmıyor."
+Birden fazla eşik aynı sabit üzerinden tanımlanmış ve görevleri karışıyor. Kodda `CONTACT_THRESHOLD_M = 0.030` (30mm) hem quality label üretimi hem de eval metriği için kullanılıyor; eğitim contact loss hinge'i ise ayrıca 15mm'de. Bu üç amacın tek sabite bağlı olması hem eğitim sinyalini hem de metriği yanıltıcı hale getiriyor.
 
-Ayrıca yüzey mesafesi gerçek mesh üzerinden hesaplanmıyor, objenin merkezine olan mesafeyle yaklaşık hesaplanıyor (centroid-proxy). Karmaşık şekilli objeler için bu tamamen yanlış bir ölçüm.
+Ayrıca yüzey mesafesi gerçek mesh üzerinden değil, objenin merkezine olan mesafeyle yaklaşık hesaplanıyor (centroid-proxy). Karmaşık şekilli objeler için bu tamamen yanlış bir ölçüm.
+
+**Eşik Tablosu — Önce Bunları Ayır:**
+
+| Amaç | Önerilen Eşik | Açıklama |
+|------|--------------|----------|
+| Phase label (approach/contact) | ~30mm | Gürültülü temas fazını belirler, büyük tolerans mantıklı |
+| Eğitim contact loss | ~5mm | Öğrenme sinyali, sıkı tutulmalı |
+| Eval contact metriği | ~2–5mm | Nihai geometrik temas standardı |
+| Unity physics collision | collider teması | Gerçek simülasyon olayı |
+
+Bu dört amacı aynı sabite bağlamak döngüsel bağımlılık yaratır.
 
 **Çözüm Planı:**
 
-**1. Contact loss threshold'unu küçült (hızlı düzeltme):**
-- 15mm → 5mm. Parmak ucu 5mm içine girdiğinde ödüllendir.
-- Bunu yapmak için: `model_io.py`'da `CONTACT_THRESHOLD_M = 0.005` (zaten bu değer vardı, sonra 30mm'ye çıkarıldı, 5mm'ye geri dön ama FK hatasını düzeltilmiş halleriyle).
+**1. Eşikleri ayır:**
+- `model_io.py`'da `CONTACT_THRESHOLD_M` yalnızca eval metriği için kullan (önerilen: 5mm).
+- Eğitim loss'undaki hinge'i ayrı bir sabit olarak tanımla (önerilen: 5mm).
+- Phase label üretimi mevcut 30mm toleransında kalabilir.
 
-**2. Contact loss ağırlığını artır:**
-- Mevcut: `contact_weight = 0.3`
-- Yeni: `contact_weight = 2.0` — contact loss dominant hale gelsin, model bunu görmezden gelemesin.
+**2. Contact loss ağırlığını sweep ile bul:**
+- `contact_weight ∈ {0.3, 0.7, 1.0, 2.0}` ile aynı seed ve eğitim bütçesinde dört çalıştırma yap.
+- Her birinde contact ratio, pose error ve penetration'ı birlikte raporla.
+- 0.3'ten doğrudan 2.0'a atlamak reconstruction veya anatomik doğruluğu bozabilir; sweep bu trade-off'u gösterir.
 
-**3. Gerçek mesh SDF kullan (temel düzeltme):**
-- Centroid-proxy yerine her obje için önceden hesaplanmış SDF grid (signed distance field) yükle.
-- Her parmak ucu için objenin gerçek yüzeyine olan mesafeyi hesapla.
-- Bu değişiklik hem contact_loss'u hem penetration_loss'u anlamlı hale getirir.
-- Nasıl: `trimesh` kütüphanesiyle her obje mesh'i için 32³ veya 64³ SDF grid önceden hesapla, eğitimde lookup yap.
-
-**4. Loss ile metriği ayır:**
-- Contact metriği loss'tan farklı bir eşikle ölçülmeli. Loss'ta 5mm threshold kullan (öğrenme sinyali), metrikte 2mm threshold kullan (gerçek temas standardı). Döngüsel bağımlılığı kır.
+**3. Gerçek yüzey mesafesi kullan:**
+- Centroid-proxy yerine point cloud üzerinde differentiable nearest-neighbor distance hesapla.
+- Yüzey normalleriyle penetration yönünü doğrula.
+- Eğer zaman yeterse `trimesh` ile SDF grid (32³) ekle — ama SDF için non-watertight mesh kontrolü, grid sınırı dışı noktalar ve differentiable interpolasyon gerekliliğini göz önünde bulundur; bu bir günlük iş değil.
 
 ---
 
@@ -154,15 +175,18 @@ Gerçek soru şu olmalı: "Model hiç görmediği bir objeyi kavrayabilir mi?" B
 
 **Çözüm Planı:**
 
-1. `build_oakink_canonical.py` içinde bölümlemeyi obje bazlı yap:
-   - Tüm objeleri listele (~1800 obje)
-   - %80 objeyi (1440 obje ve bunların tüm örnekleri) eğitime al
-   - %10 objeyi (180 obje) doğrulamaya, %10'unu (180 obje) teste al
-   - Aynı objenin örnekleri tek bir sette kalır
+1. `build_oakink_canonical.py` içinde bölümlemeyi obje bazlı ve kategori-dengeli yap:
+   - Objeleri kategorilere göre grupla
+   - Her kategoriden %80/%10/%10 oranında obje seç (kategori dağılımını korumak için stratified)
+   - Aynı objenin tüm örnekleri aynı sette kalır
+   - Sabit seed kullan ve split.json olarak kaydet
 
 2. `dataset.npz`'yi yeniden üret.
 
-3. Modeli yeniden eğit ve metrikleri yeniden hesapla. Büyük ihtimalle test performansı düşecek — bu normal ve dürüst.
+3. **İki ayrı test sonucu raporla — eskisini silme:**
+   - *Seen-object test* (mevcut sample-level split sonucu): geçmiş sonuçlarla karşılaştırılabilirliği korur
+   - *Unseen-object test* (yeni object-level split): gerçek genellemeyi gösterir
+   - Bu iki sonucu aynı tabloda "upper bound" ve "generalization" olarak sun
 
 ---
 
@@ -174,8 +198,8 @@ Temporal modelin HOT3D üzerinde ince ayarı (Phase 2) yalnızca 14 epoch sürd�
 
 **Çözüm Planı:**
 
-1. Phase 2'yi 14 epoch yerine 50+ epoch çalıştır.
-2. Erken durdurma kriterini `val_rec` yerine `contact_ratio` üzerinden belirle — gerçek hedefin iyileştiği yerde dur.
+1. Phase 2'yi 14 epoch yerine 50+ epoch çalıştır — ama önce validation eğrilerini kontrol et; sadece train loss'un düşmesi daha uzun eğitimin faydalı olacağını garanti etmez.
+2. Erken durdurma için tek metriğe bağlanma. `contact_ratio`'ya göre durdurmak modeli parmakları objeye yapıştırmaya iterebilir — pose error artar, penetrasyon artar. Bunun yerine birincil kriter `val_rec` olsun; contact ratio'yu ayrıca izle ve ikisi birlikte iyileşiyorken checkpoint al.
 3. Phase 2 epoch süresi ~5 dakika, 50 epoch = ~4 saat. Makul süre.
 
 ---
@@ -197,9 +221,11 @@ Eksik olan şu: **augmentasyonun modele gerçekten katkı sağlayıp sağlamadı
 - Geodesic error ve contact ratio'yu karşılaştır.
 - Sonuç: "Augmentasyon geodesic error'ı X°'den Y°'ye düşürüyor" — katkı kanıtlanmış olur.
 
-**2. HOT3D Phase 2'de augmentasyon kontrol et (~1 saat):**
+**2. HOT3D Phase 2'de augmentasyon kontrolü (~1 saat):**
 - `dataset_hot3d.py` içinde `augment` flag'inin Phase 2 eğitiminde de aktif olduğunu doğrula.
-- Temporal sekanslar için yaw augmentasyonu tüm frame'lere tutarlı uygulanmalı (zaten `augment_frame_feat` bunu yapıyor, ancak kullanımı doğrula).
+- Temporal sekanslar için yaw augmentasyonu tüm frame'lere tutarlı uygulanmalı (zaten `augment_frame_feat` bunu yapıyor, kullanımı doğrula).
+
+**Not:** Canonical frame objeye bağlı değil dünya koordinatlarına göreyse yaw augmentasyonu gerçek çeşitlilik katıyor. Eğer canonical frame zaten obje rotasyonunu kaldırıyorsa augmentasyonun katkısı sınırlı olabilir; ablation bunu da ortaya çıkarır.
 
 Bu ablation sonucu tezde "Veri Artırma" alt başlığı altında raporlanabilir.
 
@@ -220,29 +246,24 @@ Bu sayılar teknik anlamda doğru ama sezgisel olarak hiçbir şey anlatmıyor. 
 **Çözüm Planı:**
 
 **1. Statik görselleştirme (~1 gün):**
-- Her test objesinden en iyi ve en kötü 3 kavrama örneğini seç.
+- Yalnızca "en iyi ve en kötü 3 örnek" seçmek selection bias yaratır. Bunun yerine: rastgele örnekler + median performans + en iyi + en kötü + en az bir başlıca failure category.
 - MANO mesh'i (parmaklar) + obje point cloud'u 3D görselleştir, PNG olarak kaydet.
-- Matplotlib veya Open3D kullan.
 - Göster: predicted pose (kırmızı) vs. ground truth (yeşil), yanyana.
+- Mümkünse contact points, penetrating vertices ve joint-limit ihlallerini renk kodla.
 
 **2. Temporal animasyon (~1 gün):**
 - HOT3D test setinden 3-5 sekans seç.
 - Frame-by-frame model çıktısını kaydet, GIF veya MP4 üret.
-- Göster: el objeye yaklaşırken parmaklar nasıl hareket ediyor.
+- Aynı kamera açısı ve eşit hız kullan. Sadece başarılı demolar değil en az bir failure case göster — tez daha güvenilir görünür.
 
 **3. Unity demo kaydı (~yarım gün):**
 - Demo scene çalışıyor, sadece ekran kaydı al.
 - 3 farklı obje (mug, bowl, pot), her biri için kavrama göster.
 - 30-60 saniyelik video tezin en ikna edici belgesi olacak.
 
-**Kullanılacak araçlar:**
 ```python
-# Statik görselleştirme için
 import open3d as o3d
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-
-# Video için
 import imageio  # GIF üretimi
 import cv2      # MP4 üretimi
 ```
@@ -257,14 +278,20 @@ Geodesic error 9.7° iyi mi kötü mü? MPJPE 5.7mm nerede duruyor? Bu soruları
 
 GrabNet OakInk üzerinde yayınlanmış sonuçlar var. ContactOpt benzer metrikleri raporluyor. Bu sistemin o çalışmalarla nasıl karşılaştırıldığı bilinmiyor.
 
-**Çözüm Planı:**
+**Çözüm Planı — İki Ayrı Tablo:**
 
-1. GrabNet'in orijinal paper'ındaki OakInk metriklerini bul (zaten yayınlanmış).
-2. Kendi sonuçlarını aynı tablo formatında yan yana koy.
-3. Eğer sistem daha kötü çıkarsa dürüstçe "neden daha kötü ve biz ne ekliyoruz (temporal)" tartış.
-4. Eğer daha iyi çıkarsa güçlü bir katkı kanıtı elde edilmiş olur.
+Dataset split, input modality, MANO representation, metric implementation ve evaluation sample count aynı değilse yayınlanmış sayıları doğrudan karşılaştırmak yanıltıcı olabilir.
 
-Bu karşılaştırmayı yapmak için yeni deney gerekmez — sadece literatür araştırması ve tablo oluşturma.
+**Tablo 1 — Literatür Bağlam:**
+- GrabNet, ContactOpt gibi çalışmaların yayınlanmış metriklerini listele.
+- Yanına "not directly comparable — farklı split/implementation" notu ekle.
+- Bu tablo "biz bu aralıkta duruyoruz" demek içindir.
+
+**Tablo 2 — Reproduced Baseline (asıl karşılaştırma):**
+- Aynı split ve aynı eval kodu üzerinde çalıştırabileceğin bir baseline (örn. deterministik decoder veya BBox modeli).
+- Bu tablo ablation sonuçlarıyla birleşir.
+
+GrabNet'i aynı pipeline'da çalıştırmak mümkün değilse "referans aralık" olarak sun; "biz daha iyiyiz" sonucu çıkarma.
 
 ---
 
@@ -274,35 +301,45 @@ Bu karşılaştırmayı yapmak için yeni deney gerekmez — sadece literatür a
 
 Tezin iddialarından biri "gerçek zamanlı XR'da kullanılabilir." Hedef inference süresi <5ms. Ama bu hiç ölçülmemiş.
 
-90 FPS VR için her kare 11ms'de tamamlanmalı. Model inference + Unity render + Air Link gecikme = toplam <30ms hedefi. Modelin ne kadar sürdüğü bilinmeden bu hedefin karşılanıp karşılanmadığı söylenemez.
+90 FPS VR için her kare 11ms'de tamamlanmalı. Model inference + Unity render + Air Link gecikme = toplam <30ms hedefi. Modelin ne kadar sürdüğü bilinmeden bu hedefin karşılanıp karşılanmadığı söylenemez. Ayrıca <5ms modelin tek forward geçişine ait olabilir; end-to-end XR latency değildir.
 
 **Çözüm Planı (~2 saat):**
 
 ```python
 # src/eval/benchmark_latency.py
-
 import torch, time
-model.eval()
+from statistics import mean
+import numpy as np
 
-# GPU warm-up
-for _ in range(10):
+model.eval()
+device = next(model.parameters()).device
+
+# Warm-up (50 tekrar)
+for _ in range(50):
     _ = model(frame_feat, obj_pts, prev_pose)
 
-# Gerçek ölçüm
+# Gerçek ölçüm (500 tekrar)
 times = []
 with torch.no_grad():
-    for _ in range(100):
+    for _ in range(500):
         start = time.perf_counter()
         _ = model(frame_feat, obj_pts, prev_pose)
-        torch.cuda.synchronize()  # GPU işinin bitmesini bekle
+        # MPS için: torch.mps.synchronize() | CUDA için: torch.cuda.synchronize()
+        if device.type == "mps":
+            torch.mps.synchronize()
+        elif device.type == "cuda":
+            torch.cuda.synchronize()
         times.append(time.perf_counter() - start)
 
-print(f"Ortalama: {mean(times)*1000:.2f} ms")
-print(f"P95: {percentile(times, 95)*1000:.2f} ms")
-print(f"P99: {percentile(times, 99)*1000:.2f} ms")
+print(f"Median: {np.median(times)*1000:.2f} ms")
+print(f"Mean:   {mean(times)*1000:.2f} ms")
+print(f"P95:    {np.percentile(times, 95)*1000:.2f} ms")
+print(f"P99:    {np.percentile(times, 99)*1000:.2f} ms")
 ```
 
-K=1, K=3, K=5 için ayrı ayrı ölç ve tabloya koy. Unity tarafında da `AuraXRModelRuntime.latencyMs` zaten loglanıyor — demo sırasında gerçek latency'yi ölç.
+Raporda şunları belirt: donanım (MPS / CPU / ONNX), K değeri, input shapes, thread ayarları. Ölçüme nelerin dahil olduğunu açık yaz: point cloud preprocessing, model forward, candidate scoring — sadece forward geçişi değil.
+
+Unity tarafında da `AuraXRModelRuntime.latencyMs` zaten loglanıyor — demo sırasında end-to-end latency'yi de ölç ve tabloya koy.
 
 ---
 
@@ -317,8 +354,11 @@ Akademik standartta en az 3 farklı seedle çalıştırıp ortalamayla standart 
 **Çözüm Planı:**
 
 1. Phase 1 eğitimini seed=42, 123, 456 ile 3 kez çalıştır (~3 × 50 epoch × 11 sn = ~30 dakika).
-2. Phase 2'yi de 3 kez çalıştır (~3 × 14 epoch × 5 dk = ~3.5 saat, ama bu 50 epocha uzatılacaksa ~12 saat).
+2. Phase 2'yi de 3 kez çalıştır — 50 epocha uzatılacaksa ~12 saat.
 3. Tüm metrik tabloları `mean ± std` formatına dönüştür.
+4. HOT3D'de obje sayısı çok az (33) olduğundan sample-level std yanıltıcı olabilir. Mümkünse object-level bootstrap confidence interval da hesapla.
+
+Kaynak kısıtlıysa her ablation'ı 3 seed ile çalıştırmak gerekmez — önce 1 seed ile hiperparametre tara, seçilen en iyi varyantı 3 seed ile tekrarla.
 
 ---
 
@@ -339,7 +379,7 @@ Bu değerlendirme hiç yapılmadı. Yani "sistem gerçekten çalışıyor mu?" s
 Eğer kalan zaman kısıtlıysa alternatif:
 
 **Offline karşılaştırma (hızlı, 1-2 gün):**
-- Unity fizik eval yerine OakInk üzerinde GrabNet ile sayısal karşılaştırma yap.
+- Unity fizik eval yerine OakInk üzerinde GrabNet ile sayısal karşılaştırma yap (C2 tablosuyla birleşir).
 - "Fizik simülasyonu yapamadık ama offline metrikte mevcut SOTA ile karşılaştırıldığımızda X durumundayız" dürüst bir yaklaşım.
 
 **Minimal Unity eval (1 hafta):**
@@ -363,12 +403,16 @@ Ama success_prob eğitilmedi çünkü Unity'den etiket gelmedi. Eğitilmemiş bi
 **Seçenek 1 — Heuristic ile değiştir (hızlı):**
 - success_prob yerine quality_score kullan (OakInk'te Spearman 0.72 var).
 - K=5 aday üret, quality_score en yüksek olanı seç.
-- HOT3D'de zayıf ama sıfırdan iyi.
+- Önce random selection ve first candidate ile karşılaştır; quality selection random'dan kötü çıkarsa kullanma.
 
-**Seçenek 2 — success_prob'u offline etiketle:**
-- Unity fizik eval yapmak yerine, OakInk üzerinde contact ratio > 0.5 olan örnekleri "başarılı", olmayanları "başarısız" olarak etiketle.
-- success_head'i bu etiketle fine-tune et.
-- Sınırlı ama çalışan bir aday seçimi elde edilmiş olur.
+**Seçenek 2 — Offline geometrik etiket (dürüst isimle):**
+- OakInk üzerinde contact ratio > 0.5 olan örnekleri "geometrik olarak geçerli", olmayanları "geçersiz" olarak etiketle.
+- success_head'i bu etiketle fine-tune et — ama bunu `geometric_validity_prob` olarak adlandır, `success_prob` değil.
+- Gerçek fiziksel başarı (friction, force closure, mass, collider stability) bu etiketle ölçülemiyor; yanıltıcı isim kullanmak jüride soru yaratır.
+
+**Seçenek 3 — Head'i kaldır (en dürüst):**
+- Unity etiketi olmadan success_head'i eğitmek mümkün değil. Head'i tezden çıkar, "gelecek çalışma: Unity fizik eval ile success etiketi üretimi" olarak sun.
+- Zayıf proxy ile "çalışıyor" göstermeye çalışmaktan daha bilimsel.
 
 ---
 
@@ -378,17 +422,18 @@ Kalan zamanı verimli kullanmak için öncelik sırası:
 
 | # | Görev | Süre | Etki |
 |---|-------|------|------|
-| 1 | SingleFrame baseline çalıştır | 1 gün | Temporal katkısını kanıtlar |
-| 2 | MLP-BBox baseline çalıştır | 1 gün | Geometri katkısını kanıtlar |
-| 3 | OakInk object-level split düzelt + yeniden eğit | 1 gün | Metodolojik hatayı düzeltir |
-| 4 | Contact loss redesign (threshold küçült + ağırlık artır) | 1 gün | En kritik metrik iyileşmesi |
-| 5 | Augmentasyon ablation çalıştır (var, etkisi ölçülmemiş) | yarım gün | Augmentasyon katkısını kanıtlar |
-| 6 | Statik görselleştirme üret | 1 gün | Jüriye kanıt |
-| 7 | Latency benchmark çalıştır | 2 saat | "Gerçek zamanlı" iddiasını doğrular |
-| 8 | Phase 2 uzun eğit (50 epoch) | 4 saat | Temporal kalite iyileşmesi |
-| 9 | 3 seed ile yeniden çalıştır | 1 gün | İstatistiksel güvenilirlik |
-| 10 | Unity blend mesafesini ayarla (10→4cm) | 1 saat | Approach-to-grasp görsel iyileşme |
-| 11 | Demo videosu kaydet | 2 saat | En ikna edici materyal |
-| 12 | SOTA karşılaştırma tablosu | yarım gün | Bağlam sağlar |
+| 1 | OakInk object-level + category-stratified split + seen/unseen ikili test | 1 gün | Metodolojik güvenilirlik |
+| 2 | Temporal baseline (SingleFrame-MLP / GRU-T1 / GRU-T16) | 1 gün | Temporal katkısını kanıtlar |
+| 3 | Geometri baseline (pose-only / BBox / PointNet) | 1 gün | Geometri katkısını kanıtlar |
+| 4 | Deterministik decoder + oracle-K karşılaştırması (A2 ile birleşir) | 2 saat | CVAE gerekliliğini belirler |
+| 5 | Contact eşiklerini ayır + contact_weight sweep | 1 gün | Kavramsal tutarlılık + metrik iyileşmesi |
+| 6 | Nearest-surface contact loss (centroid-proxy yerine) | 1 gün | En kritik performans sorunu |
+| 7 | Ana varyantları 3 seed ile çalıştır | 1 gün | İstatistiksel güvenilirlik |
+| 8 | Latency benchmark (MPS + ONNX + Unity end-to-end) | 2 saat | "Gerçek zamanlı" iddiasını doğrular |
+| 9 | Görselleştirme: rastgele + median + failure case | 1 gün | Savunmada ikna edici kanıt |
+| 10 | Demo videosu kaydet | 2 saat | En ikna edici materyal |
+| 11 | Phase 2 uzun eğit (50 epoch, erken durdurma val_rec birincil) | 4 saat | Temporal kalite iyileşmesi |
+| 12 | Augmentasyon ablation | yarım gün | Augmentasyon katkısını kanıtlar |
+| 13 | SOTA literatür bağlam tablosu | yarım gün | Bağlam sağlar |
 
-**İlk 4 görev tezin bilimsel zeminini kuruyor. 5-8 performansı artırıyor. 9-12 sunumu güçlendiriyor.**
+**İlk 6 görev tezin bilimsel zeminini ve metodolojik güvenilirliğini kuruyor. 7-10 sonuçları güçlendiriyor ve sunumu hazırlıyor. 11-13 iyileştirme ve bağlam.**
