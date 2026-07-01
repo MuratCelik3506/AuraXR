@@ -18,14 +18,21 @@ namespace AuraXR.Demo.Editor
             table.name = "DemoTable";
             table.transform.SetParent(root.transform);
             table.transform.position = new Vector3(0f, -0.05f, 0.55f);
-            table.transform.localScale = new Vector3(0.8f, 0.05f, 0.6f);
+            table.transform.localScale = new Vector3(1.35f, 0.05f, 0.6f);
 
             GameObject objectRoot = new GameObject("DemoObjectRoot");
             objectRoot.transform.SetParent(root.transform);
 
-            AuraXRDemoObject mug = CreateDemoObject("ObjectSlot_Mug", "mug_white", PrimitiveType.Cylinder, new Vector3(-0.22f, 0.06f, 0.55f), objectRoot.transform);
-            CreateDemoObject("ObjectSlot_Box", "can_parmesan", PrimitiveType.Cube, new Vector3(0f, 0.06f, 0.55f), objectRoot.transform);
-            CreateDemoObject("ObjectSlot_Tool", "spatula_red", PrimitiveType.Capsule, new Vector3(0.22f, 0.06f, 0.55f), objectRoot.transform);
+            AuraXRDemoObject mug = CreateDemoObject("ObjectSlot_Mug", "mug_white", PrimitiveType.Cylinder, new Vector3(-0.50f, 0.06f, 0.55f), objectRoot.transform);
+            AuraXRDemoObject pinchPalmTool = CreateDemoObject(
+                "ObjectSlot_PinchPalmTool",
+                "spatula_red",
+                PrimitiveType.Capsule,
+                new Vector3(0f, 0.06f, 0.55f),
+                objectRoot.transform,
+                new Vector3(0.06f, 0.30f, 0.06f),
+                Quaternion.Euler(0f, 0f, 90f));
+            AuraXRDemoObject can = CreateDemoObject("ObjectSlot_Can", "can_parmesan", PrimitiveType.Cube, new Vector3(0.50f, 0.06f, 0.55f), objectRoot.transform);
 
             GameObject handRoot = new GameObject("HandRoot");
             handRoot.transform.SetParent(root.transform);
@@ -48,7 +55,9 @@ namespace AuraXR.Demo.Editor
             var logger = runtime.AddComponent<AuraXRDemoLogger>();
 
             assembler.wrist = wrist.transform;
-            assembler.activeObject = mug;
+            assembler.candidateObjects = new[] { mug, pinchPalmTool, can };
+            assembler.useNearestObject = true;
+            assembler.activeObject = pinchPalmTool;
             model.featureAssembler = assembler;
             retargeter.modelRuntime = model;
             blend.featureAssembler = assembler;
@@ -67,11 +76,17 @@ namespace AuraXR.Demo.Editor
 
         private static AuraXRDemoObject CreateDemoObject(string name, string objectId, PrimitiveType primitive, Vector3 position, Transform parent)
         {
+            return CreateDemoObject(name, objectId, primitive, position, parent, new Vector3(0.08f, 0.08f, 0.08f), Quaternion.identity);
+        }
+
+        private static AuraXRDemoObject CreateDemoObject(string name, string objectId, PrimitiveType primitive, Vector3 position, Transform parent, Vector3 scale, Quaternion rotation)
+        {
             GameObject go = GameObject.CreatePrimitive(primitive);
             go.name = name;
             go.transform.SetParent(parent);
             go.transform.position = position;
-            go.transform.localScale = new Vector3(0.08f, 0.08f, 0.08f);
+            go.transform.rotation = rotation;
+            go.transform.localScale = scale;
             var demo = go.AddComponent<AuraXRDemoObject>();
             demo.objectId = objectId;
             demo.bboxDiagonalM = 0.1f;

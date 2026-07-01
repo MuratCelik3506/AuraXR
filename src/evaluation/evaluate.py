@@ -98,6 +98,7 @@ def evaluate_loader(
     quality_scores_all: list[float] = []
     quality_labels_all: list[float] = []
     diversity_scores: list[float] = []
+    oracle_k_geo_errs: list[float] = []  # A2: oracle best-of-K geodesic error
 
     # Per-object accumulators: obj_name -> list of per-sample values
     obj_geo:    dict[str, list[float]] = defaultdict(list)
@@ -176,8 +177,16 @@ def evaluate_loader(
                     obj_contact[oname].append(float(contact_ratio(p_i, opc_i)))
 
         if k > 1 and "candidate_poses" in out:
-            cand = out["candidate_poses"]
+            cand = out["candidate_poses"]  # (B, K, 45)
             diversity_scores.append(float(diversity_score(cand)))
+            # A2: oracle best-of-K — pick candidate closest to ground truth
+            B_c, K_c, _ = cand.shape
+            target_exp = target[:B_c].unsqueeze(1).expand(B_c, K_c, -1)
+            geo_per_k = torch.stack(
+                [geodesic_rotation_error(cand[:, ki, :], target[:B_c]) for ki in range(K_c)]
+            )  # (K, B)
+            oracle_geo = geo_per_k.min(dim=0).values.mean()
+            oracle_k_geo_errs.append(float(oracle_geo))
 
         # Collect for sequence-level jitter (HOT3D provides seq_path + target_index).
         seq_paths    = batch.get("seq_path")
@@ -221,9 +230,11 @@ def evaluate_loader(
         metrics["quality_ece"]      = expected_calibration_error(qs, binary_labels)
         metrics["quality_spearman"] = spearman_correlation(qs, ql)
 
-    # Diversity
+    # Diversity + oracle-K (A2)
     if diversity_scores:
         metrics["diversity_score"] = _safe_mean(diversity_scores)
+    if oracle_k_geo_errs:
+        metrics["oracle_k_geodesic_err_deg"] = _safe_mean(oracle_k_geo_errs)
 
     # Sequence-level jitter metrics (HOT3D only, requires seq_path in batch)
     if has_seq_info and seq_preds:
@@ -284,7 +295,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint",  type=str, default=None)
     parser.add_argument("--source",      choices=["oakink", "hot3d", "both"], default="hot3d")
-    parser.add_argument("--split",       choices=["val", "test", "all"], default="val")
+    parser.add_argument("--split",
+                        choices=["val", "test", "all", "seen_test", "unseen_test"],
+                        default="val")
     parser.add_argument("--phase",       type=int, default=None,
                         help="Training phase (1/2/3) for metadata — informational only.")
     parser.add_argument("--batch",       type=int, default=64)
@@ -297,14 +310,27 @@ def main() -> None:
     args = parser.parse_args()
 
     dev = get_device()
-    model = GraspModel()
 
-    # Load checkpoint and extract epoch if available
+    # Load checkpoint first to read saved model args (ablation flags may differ from defaults)
     epoch: int | None = None
+    saved_model_args: dict = {}
     if args.checkpoint:
         ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
-        state = ckpt["model"] if "model" in ckpt else ckpt
+        saved_model_args = ckpt.get("args", {})
         epoch = int(ckpt["epoch"]) if "epoch" in ckpt else None
+
+    model = GraspModel(
+        hidden=saved_model_args.get("hidden", 256),
+        z_dim=saved_model_args.get("z_dim", 64),
+        encoder_type=saved_model_args.get("encoder_type", "gru"),
+        obj_encoder_type=saved_model_args.get("obj_encoder_type", "pointnet"),
+        use_attention=saved_model_args.get("use_attention", True),
+        use_film=saved_model_args.get("use_film", True),
+        use_success_head=saved_model_args.get("use_success_head", False),
+    )
+
+    if args.checkpoint:
+        state = ckpt["model"] if "model" in ckpt else ckpt
         model.load_state_dict(state)
     model.eval().to(dev)
 
@@ -326,7 +352,8 @@ def main() -> None:
     results: dict = {"meta": meta}
 
     if args.source in ("oakink", "both"):
-        oak_split = "val" if args.split == "val" else "test"
+        # "test" maps to "seen_test" for backwards compat; explicit "unseen_test" passes through
+        oak_split = args.split if args.split != "test" else "seen_test"
         ds = OakInkStaticDataset(split=oak_split, n_points=args.n_points, augment=False)
         loader = DataLoader(ds, batch_size=args.batch, shuffle=False,
                             num_workers=args.workers, collate_fn=collate_oakink)
@@ -341,14 +368,14 @@ def main() -> None:
         results["hot3d"] = evaluate_loader(model, loader, dev, "hot3d", args.k)
         print("HOT3D:", json.dumps(results["hot3d"], indent=2))
 
-    # Write — timestamped filename so runs never overwrite each other
+    # Write output
     if args.out:
         out_path = Path(args.out)
     else:
         ts_file = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_path = RESULTS_DIR / f"eval_{args.source}_{args.split}_{ts_file}.json"
+        out_path = RESULTS_DIR / f"manual_{args.source}_{args.split}_{ts_file}" / "eval.json"
 
-    RESULTS_DIR.mkdir(exist_ok=True)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(results, indent=2))
     print(f"\nWrote {out_path}")
 

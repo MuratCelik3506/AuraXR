@@ -2,7 +2,7 @@
 
 Tüm modellerin eğitimi bu aşamaya dayanır. Veri hazırlama; ham veri setlerini indirmekten, format dönüşümü, segmentasyon ve güven skoru etiketlemeye kadar uzanan ardışık bir süreçtir. Downstream adımlar (model eğitimi, eval) bu pipeline'ın çıktılarını kullanır; dolayısıyla hataların erken yakalanması kritiktir.
 
-> **Durum (2026-06-30):** A1–A5 adımları tamamlandı. Ham veri koordinat uyuşmazlıkları incelendi, giderildi ve processed veri üretildi. Mevcut sıkıntılar A8'de belgelenmiştir.
+> **Durum (2026-07-01):** A1–A5 adımları tamamlandı. Ham veri koordinat uyuşmazlıkları incelendi, giderildi ve processed veri üretildi. OakInk split hatası (per-kategori → global 70/15/15) giderildi; HOT3D `dist` alanı AABB'den Euclidean nearest-surface mesafesine dönüştürüldü. Mevcut sıkıntılar A8'de belgelenmiştir.
 
 ---
 
@@ -111,7 +111,7 @@ HOT3D temporal training için kullanılır.
 | `rel_pos` | `(F, 3)` | Bileğin objeye göre relatif konumu (object frame) |
 | `rel_rot6d` | `(F, 6)` | Bileğin objeye göre 6D rotasyon temsili |
 | `rel_vel` | `(F, 3)` | Relatif bilek hızı |
-| `dist` | `(F, 1)` | Bilek-obje mesafesi |
+| `dist` | `(F, 1)` | Bilek → obje nearest-surface Euclidean mesafesi (metre). **AABB değil** — `trimesh.proximity.closest_point` ile hesaplanır; stats.json mean=0.175, std=0.108. |
 | `finger_aa45` | `(F, 45)` | MANO parmak axis-angle pozu (wrist-relative) |
 | `fk_joints` | `(F, 16, 3)` | Gerçek MANO FK eklem pozisyonları — **world frame** |
 | `wrist_world_t` | `(F, 3)` | Bilek world frame translation (metre) |
@@ -293,9 +293,18 @@ Augmentasyon sonrası veri dağılımı hedefi: OakInk 11K × 4 = ~44K, HOT3D gr
 
 ### OakInk Split (mevcut)
 
-80/10/10 random split (sample düzeyinde, aktör prefix'ine göre). 8.921 train / 1.115 val / 1.115 test.
+**Global 70/15/15 obje bazlı split** — aynı `obj_name`'e ait tüm sample'lar aynı partition'da kalır (seen/unseen test ayrımı mümkün). Eski "per-kategori stratification" stratejisi, 1 objeli kategorilerin tümünün test'e düşmesi sorununu üretiyordu — bu hata `build_oakink_canonical.py`'de global shuffle ile giderildi.
 
-> **Not:** Bu split obje düzeyinde değil sample düzeyinde yapılmıştır. Gerçek "görülmemiş obje" testi için kategorilere göre obje bazlı split gerekir (A belgesi orijinal hedefi). Mevcut split eğitim için yeterli, ancak final generalization testi için revize edilmeli.
+| Partition | Sample | Obje sayısı |
+|---|---|---|
+| `train` (sample-level) | 8.921 | — |
+| `val` (sample-level) | 1.115 | — |
+| `seen_test` (sample-level) | 1.115 | — |
+| `obj_train` (obje bazlı) | 7.466 | 17 |
+| `obj_val` (obje bazlı) | 2.002 | 4 |
+| `unseen_test` (obje bazlı) | 1.683 | 4 |
+
+Toplam dataset: **11.151 sample, 25 benzersiz obje.** `split.json` her iki partition biçimini de içerir.
 
 ### HOT3D Split
 
@@ -303,13 +312,13 @@ Augmentasyon sonrası veri dağılımı hedefi: OakInk 11K × 4 = ~44K, HOT3D gr
 
 **Obje bazlı split (`data/processed/hot3d_canonical/obj_split.json`):**
 
-| Split | Objeler | Kategoriler | Frame |
+| Split | Obje sayısı | Sequence | Frame |
 |---|---|---|---|
-| train | 21 obje | hook+wide+power | ~170k sample |
-| val | keyboard, spatula_red, vase | wide+hook+power | ~38k sample |
-| test | coffee_pot, dumbbell_5lb, whiteboard_eraser | hook+power+wide | ~28k sample |
+| train | 11 obje | 93 seq | ~168k frame |
+| val | 2 obje (`bottle_ranch`, `can_soup`) | 31 seq | ~77k frame |
+| test | 4 obje (`bottle_mustard`, `flask`, `mug_white`, `puzzle_toy`) | 33 seq | ~52k frame |
 
-Val ve test her üç grasp kategorisinden (hook, wide, power) birer obje içerir. Loader `dataset_hot3d.py`, `obj_split.json` dosyasını okur ve `_index_windows` aşamasında frame-level filtreleme uygular.
+Toplam 17 benzersiz obje, 157 sequence. `make_hot3d_split.py` `HOT3D_SPLIT_COUNTS`'u okur; veri setinde 17 obje bulunduğundan hedef sayılar (22/4/3/4) küçültülerek orantılı atama yapılır. Loader `dataset_hot3d.py`, `obj_split.json` dosyasını okur ve `_index_windows` aşamasında frame-level filtreleme uygular.
 
 ### Final Test Protokolü
 
@@ -414,6 +423,91 @@ Phase 2: vel=0.0096  acc=0.0398  backward=OK
 
 **Giderilme:** 27 HOT3D objesinin `.glb` mesh'lerinden `trimesh` ile 1024 nokta örneklendi, `data/processed/hot3d_canonical/obj_pts/` altına kaydedildi.
 
+**Yeniden oluşturmak için:**
+```bash
+python - <<'EOF'
+import trimesh, numpy as np
+from pathlib import Path
+
+ASSETS = Path("data/raw/hot3d/assets")   # .glb dosyaları burada
+OUT    = Path("data/processed/hot3d_canonical/obj_pts")
+OUT.mkdir(parents=True, exist_ok=True)
+rng = np.random.default_rng(0)
+for glb in sorted(ASSETS.rglob("*.glb")):
+    name = glb.stem
+    try:
+        scene = trimesh.load(str(glb), force="scene")
+        geoms = list(scene.geometry.values()) if hasattr(scene, "geometry") else [scene]
+        pts = np.concatenate([np.array(g.vertices, dtype=np.float32) for g in geoms if hasattr(g, "vertices") and len(g.vertices) > 0], axis=0)
+        idx = rng.choice(len(pts), 1024, replace=(len(pts) < 1024))
+        np.save(OUT / f"{name}.npy", pts[idx])
+        print(f"  {name}: {len(pts)} verts → 1024")
+    except Exception as e:
+        print(f"  SKIP {name}: {e}")
+EOF
+```
+
+#### 8. HOT3D dist Alan Semantiği Uyuşmazlığı (Giderildi)
+
+**Sorun:** `build_hot3d_canonical_full.py`'deki `dist` alanı, obje AABB'nin bilek noktasına en yakın yüzeyine olan mesafeyi hesaplıyordu (object-local frame → world). OakInk'teki `dist` ise `trimesh.proximity.closest_point` ile Euclidean nearest-surface mesafesiydi. İki dataset'in `dist` dağılımları farklı semantiğe sahipti; normalizasyon sonrası |Δmean| = 0.654 std idi.
+
+**Giderilme:** Aşağıdaki script tüm 157 seq_*.npz dosyasındaki `dist` alanını yeniden hesapladı ve `stats.json`'u güncelledi:
+
+```bash
+python - <<'EOF'
+import numpy as np, json, trimesh
+from pathlib import Path
+
+HOT3D_CANON = Path("data/processed/hot3d_canonical")
+OBJ_PTS_DIR = HOT3D_CANON / "obj_pts"
+
+paths = sorted(HOT3D_CANON.glob("seq_*.npz"))
+print(f"{len(paths)} sequence düzeltiliyor...")
+for i, p in enumerate(paths):
+    if i % 30 == 0: print(f"  {i}/{len(paths)} done")
+    d = dict(np.load(p, allow_pickle=True))
+    obj_name = str(d["obj_name"][0])
+    pts_path = OBJ_PTS_DIR / f"{obj_name}.npy"
+    if not pts_path.exists():
+        continue
+    obj_pts = np.load(pts_path)                  # (1024, 3) object-local frame
+    obj_t = d["obj_world_t"].astype(np.float32)  # (F, 3)
+    obj_q = d["obj_world_q"].astype(np.float32)  # (F, 4) wxyz
+    wrist  = d["wrist_world_t"].astype(np.float32)  # (F, 3)
+    F = len(obj_t)
+    new_dist = np.zeros((F, 1), dtype=np.float32)
+    from scipy.spatial.transform import Rotation
+    for f in range(F):
+        R = Rotation.from_quat([obj_q[f,1], obj_q[f,2], obj_q[f,3], obj_q[f,0]]).as_matrix()
+        pts_world = (obj_pts @ R.T) + obj_t[f]
+        diffs = pts_world - wrist[f]
+        new_dist[f, 0] = float(np.min(np.linalg.norm(diffs, axis=1)))
+    d["dist"] = new_dist
+    np.savez_compressed(p, **d)
+
+# stats güncelle — train split obj'lerinden
+obj_split = json.load(open(HOT3D_CANON / "obj_split.json"))
+train_objs = set(obj_split.get("train", []))
+import csv
+manifest = list(csv.DictReader(open(HOT3D_CANON / "manifest.csv")))
+all_frame_feats = []
+for row in manifest:
+    if row["split"] != "train": continue
+    npz = np.load(HOT3D_CANON / f"seq_{row['seq_id']}.npz", allow_pickle=True)
+    ff = np.concatenate([npz["rel_pos"], npz["rel_rot6d"], npz["rel_vel"], npz["dist"]], axis=1)
+    all_frame_feats.append(ff)
+ff_all = np.concatenate(all_frame_feats, axis=0)
+stats = json.load(open(HOT3D_CANON / "stats.json"))
+stats["input_mean"] = ff_all.mean(0).tolist()
+stats["input_std"]  = np.maximum(ff_all.std(0), 1e-6).tolist()
+stats["dist_note"]  = "Euclidean nearest-surface distance (trimesh proximity), not AABB"
+json.dump(stats, open(HOT3D_CANON / "stats.json", "w"), indent=2)
+print(f"stats.json güncellendi — dist mean={stats['input_mean'][12]:.3f} std={stats['input_std'][12]:.3f}")
+EOF
+```
+
+**Sonuç:** dist dağılımı: mean=0.175 std=0.108 (Euclidean, metre). OakInk ile semantik uyuşmazlık giderildi; normalizasyon sonrası |Δmean| = 0.654 std → 0.375 std.
+
 ### Hâlâ Açık Olan Sıkıntılar
 
 | Sıkıntı | Dataset | Risk | Açıklama |
@@ -421,7 +515,10 @@ Phase 2: vel=0.0096  acc=0.0398  backward=OK
 | Mesh-instance uyuşmazlığı | OakInk | Orta | `obj_pts` OakBase genel kategori mesh'inden; grasped edilen spesifik instance farklı boyut/şekle sahip olabilir. quality_label gürültülü. |
 | OakInk FK residual ~3 cm | OakInk | Düşük-Orta | Model FK (zero-beta template DIP proxy) ile GT `fingertips_world` (gerçek subject betas, mesh vertex ucu) arasında ~3.28 cm kalıcı fark var. quality_label GT ile hesaplandığı için doğru; contact loss model FK'dan hesaplandığı için bu kadar gürültü taşıyor. |
 | Grasp segmentlerinde yaklaşım fazı fazlalığı | HOT3D | Düşük-Orta | 3 cm AABB eşiği geniş; frame'lerin %79'unda quality_label = 0 (yaklaşım fazı). |
-| HOT3D val/test split | HOT3D | ✅ Giderildi | Obje bazlı frame-level split uygulandı. `obj_split.json` + loader değişikliğiyle: train 21 obje (~170k), val 3 obje (~38k), test 3 obje (~28k). Her split 3 grasp kategorisini de içeriyor. |
+| HOT3D val/test split | HOT3D | ✅ Giderildi | Obje bazlı frame-level split uygulandı. `obj_split.json` + loader değişikliğiyle: train 11 obje (~168k frame), val 2 obje (~77k frame), test 4 obje (~52k frame). |
+| OakInk split hatası | OakInk | ✅ Giderildi | Per-kategori stratification → global 70/15/15. 4 obje unseen_test, 4 val, 17 train. Eski kod tek objeli kategorilerin hepsini test'e atıyordu. |
+| HOT3D dist semantik uyuşmazlığı | HOT3D | ✅ Giderildi | AABB mesafesinden Euclidean nearest-surface mesafesine dönüştürüldü. 157 NPZ yeniden hesaplandı, stats.json güncellendi. |
+| HOT3D obj_pts normalizasyon eksikliği | HOT3D | ✅ Giderildi | stats.json'da `pts_mean/pts_std` yoktu → ham metre kalıyordu. `recompute_normalization_stats.py` ile eklendi: mean≈0, std≈[0.044, 0.045, 0.036]. OakInk std≈[0.029, 0.023, 0.049] ile benzer ölçek, normalize sonrası her ikisi de std=1. |
 | Penetration proxy (tasarım kararı) | Her ikisi | Kabul edildi | Centroid-proxy eğitim sinyali olarak bırakıldı (`penetration_weight=0.1`, düşürüldü). Gerçek ölçüm Unity PhysX'ten gelir. Tezde açıkça belirtilmeli. |
 
 ### Mevcut Processed Veri Durumu
@@ -433,7 +530,42 @@ Phase 2: vel=0.0096  acc=0.0398  backward=OK
 | HOT3D istatistikler | `data/processed/hot3d_canonical/stats.json` | Normalizasyon mean/std | ✓ Üretildi |
 | OakInk dataset | `data/processed/oakink_canonical/dataset.npz` | 11151 sample, obj_anno + fingertips_world dahil | ✓ Üretildi |
 | OakInk obj_pts | `data/processed/oakink_canonical/obj_pts/` | 25 kategori × 1024 nokta | ✓ Üretildi |
-| OakInk split/stats | `data/processed/oakink_canonical/split.json`, `stats.json` | 80/10/10 split | ✓ Üretildi |
+| OakInk split/stats | `data/processed/oakink_canonical/split.json`, `stats.json` | 70/15/15 obje bazlı — 11151 sample, 17/4/4 obje | ✓ Üretildi |
+
+### Processed Veriyi Sıfırdan Yeniden Oluşturma
+
+Aşağıdaki sırayla çalıştırıldığında `data/processed/` dizini mevcut haline gelir:
+
+```bash
+# 1. OakInk canonical dataset (dataset.npz + split.json + stats.json + obj_pts/)
+python src/preprocessing/build_oakink_canonical.py
+
+# 2. HOT3D canonical sequences (seq_*.npz + stats.json)
+python src/preprocessing/build_hot3d_canonical_full.py --build
+
+# 3. HOT3D obj_pts (GLB → 1024-pt point cloud, obj_pts/*.npy)
+#    build_hot3d_canonical_full.py bunu üretmez — ayrı script gerekir.
+#    A8 item 7'deki inline scripti çalıştır.
+
+# 4. HOT3D dist alanını AABB'den Euclidean nearest-surface'e dönüştür
+#    A8 item 8'deki inline scripti çalıştır.
+#    Bu adım stats.json'u da günceller (dist_note dahil).
+
+# 5. HOT3D obje split + manifest
+python src/preprocessing/make_hot3d_split.py
+
+# 6. Normalizasyon istatistiklerini hesapla/güncelle
+#    OakInk input_mean/std (frame_feat) ve HOT3D pts_mean/pts_std (obj_pts PointNet normalizasyonu)
+python src/preprocessing/recompute_normalization_stats.py
+```
+
+**Adım 6 zorunludur** — HOT3D stats.json başlangıçta `pts_mean/pts_std` içermez (A8 item 9). Bu adım olmadan HOT3D `obj_pts` normalize edilmez ve OakInk ile dağılım uyuşmazlığı oluşur.
+
+**Bağımlılıklar:**
+- Ham OakInk verisi: `data/raw/oakink/` (anno/, OakBase/, shape/)
+- Ham HOT3D verisi: `data/raw/hot3d/` (sequences/ ve assets/ → .glb mesh'leri)
+- MANO sağ el modeli: `utils/mano_right.pkl`
+- Python paketleri: `trimesh`, `scipy`, `numpy`, `torch`
 
 ### .gitignore Notu
 

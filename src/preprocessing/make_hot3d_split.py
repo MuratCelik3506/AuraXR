@@ -3,7 +3,8 @@
 Reads the unique objects seen across all seq_*.npz files and deterministically
 assigns them to: backbone_train(22) / backbone_val(4) / calibration(3) / held_out_test(4).
 
-Outputs split.json and manifest.csv next to the seq_*.npz files.
+Outputs obj_split.json and manifest.csv next to the seq_*.npz files.
+The dataset loader expects obj_split values named train/val/test.
 """
 from __future__ import annotations
 
@@ -42,38 +43,53 @@ def build_split(obj_to_seqs: dict[str, list[Path]], seed: int) -> dict[str, list
     shuffled = list(rng.permutation(objects))
 
     counts = {k: HOT3D_SPLIT_COUNTS[k] for k in SPLIT_ORDER}
-    surplus = n_total - sum(counts.values())
-    if surplus > 0:
+    requested_total = sum(counts.values())
+    if n_total < requested_total:
+        n_val = max(1, round(n_total * counts["backbone_val"] / requested_total)) if n_total >= 3 else 0
+        n_test = max(1, round(n_total * (counts["calibration"] + counts["held_out_test"]) / requested_total)) if n_total >= 3 else 0
+        n_train = max(1, n_total - n_val - n_test)
+        while n_train + n_val + n_test > n_total:
+            if n_test > 1:
+                n_test -= 1
+            elif n_val > 1:
+                n_val -= 1
+            else:
+                n_train -= 1
+        counts = {
+            "backbone_train": n_train,
+            "backbone_val": n_val,
+            "calibration": 0,
+            "held_out_test": n_test,
+        }
+    elif n_total > requested_total:
+        surplus = n_total - requested_total
         counts["backbone_train"] += surplus
 
-    result: dict[str, list[str]] = {}
+    four_level: dict[str, list[str]] = {}
     cursor = 0
     for level in SPLIT_ORDER:
         c = min(counts[level], len(shuffled) - cursor)
-        result[level] = shuffled[cursor: cursor + c]
+        four_level[level] = shuffled[cursor: cursor + c]
         cursor += c
-    return result
+    return {
+        "train": four_level.get("backbone_train", []),
+        "val": four_level.get("backbone_val", []),
+        "test": four_level.get("calibration", []) + four_level.get("held_out_test", []),
+    }
 
 
 def write_manifest(root: Path, obj_to_seqs: dict[str, list[Path]], split: dict[str, list[str]]) -> Path:
     obj_to_level: dict[str, str] = {}
-    for level, objs in split.items():
+    for split_tag, objs in split.items():
         for obj in objs:
-            obj_to_level[obj] = level
+            obj_to_level[obj] = split_tag
 
     manifest_path = root / "manifest.csv"
     with manifest_path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["seq_id", "obj_name", "split"])
         writer.writeheader()
         for obj, seqs in sorted(obj_to_seqs.items()):
-            level = obj_to_level.get(obj, "unassigned")
-            # Map 4-level to train/val/test for dataset split lookup
-            split_tag = (
-                "train" if level == "backbone_train"
-                else "val" if level == "backbone_val"
-                else "test" if level in ("calibration", "held_out_test")
-                else "all"
-            )
+            split_tag = obj_to_level.get(obj, "all")
             for seq_path in seqs:
                 writer.writerow({"seq_id": seq_path.stem.removeprefix("seq_"), "obj_name": obj, "split": split_tag})
     return manifest_path

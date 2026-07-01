@@ -55,7 +55,9 @@ QUALITY_W_PENETRATION = 0.3
 QUALITY_W_DIST = 0.2
 QUALITY_MAX_PENETRATION_M = 0.01  # 10mm normalization ceiling
 QUALITY_MAX_DIST_M = 0.05  # 5cm normalization ceiling
-CONTACT_THRESHOLD_M = 0.030  # 30mm: matches 3cm AABB contact detection used in HOT3D build
+CONTACT_THRESHOLD_M = 0.030       # 30mm: phase label & quality label — keep loose for HOT3D build
+EVAL_CONTACT_THRESHOLD_M = 0.005  # 5mm: strict geometric contact for eval metrics (B1)
+TRAIN_CONTACT_HINGE_M = 0.005     # 5mm: hinge threshold for contact loss during training (B1)
 
 # --- A4: HOT3D segmentation thresholds ---
 APPROACH_DIST_THRESHOLD_M = 0.15

@@ -86,20 +86,25 @@ def run_batch(
     if vel_weight > 0 and prev_pose is not None:
         prev_frame_feat  = batch.get("prev_frame_feat")
         prev2_frame_feat = batch.get("prev2_frame_feat") if acc_weight > 0 else None
+        prev_contact_flag = batch.get("prev_contact_flag")
+        prev2_contact_flag = batch.get("prev2_contact_flag")
+        prev_contact_flag = prev_contact_flag.to(dev) if prev_contact_flag is not None else None
+        prev2_contact_flag = prev2_contact_flag.to(dev) if prev2_contact_flag is not None else None
         with torch.no_grad():
             if prev_frame_feat is not None:
-                # prev_out is conditioned on prev2_pose (the step before prev_pose)
+                # prev_out is conditioned on prev2_pose (the step before prev_pose).
+                # If old datasets lack shifted contact windows, TemporalEncoder fills zeros.
                 prev_out = model.forward_train(
                     prev_frame_feat.to(dev), obj_pts.clone(), prev_pose,
                     prev_pose=prev2_pose,
-                    contact_flag=contact_flag,
+                    contact_flag=prev_contact_flag,
                 )
                 prev_pred_pose = prev_out["pred"].detach()
             if prev2_frame_feat is not None and prev2_pose is not None:
                 prev2_out = model.forward_train(
                     prev2_frame_feat.to(dev), obj_pts.clone(), prev2_pose,
                     prev_pose=None,  # no known prior before prev2; model uses zeros
-                    contact_flag=contact_flag,
+                    contact_flag=prev2_contact_flag,
                 )
                 prev2_pred_pose = prev2_out["pred"].detach()
 
@@ -116,7 +121,7 @@ def run_batch(
         out["quality_score"],
         obj_pts=obj_pts_contact,
         quality_label=quality_label,
-        success_prob=out["success_prob"] if success_weight > 0 else None,
+        success_prob=out.get("success_prob") if success_weight > 0 else None,
         success_label=success_label,
         prev_target_pose=prev_pose,
         prev_pred_pose=prev_pred_pose,
@@ -136,17 +141,43 @@ def run_batch(
 
 
 def freeze_object_encoder(model: GraspModel) -> None:
+    if model.obj_encoder is None:
+        return
     for p in model.obj_encoder.parameters():
         p.requires_grad_(False)
 
 
 def unfreeze_object_encoder(model: GraspModel) -> None:
+    if model.obj_encoder is None:
+        return
     for p in model.obj_encoder.parameters():
         p.requires_grad_(True)
 
 
 def make_loader(ds, batch_size: int, shuffle: bool, workers: int, collate_fn) -> DataLoader:
     return DataLoader(ds, batch_size=batch_size, shuffle=shuffle, num_workers=workers, collate_fn=collate_fn)
+
+
+def load_checkpoint_compatible(model: GraspModel, checkpoint_path: str) -> int:
+    """Load matching checkpoint tensors and skip stale heads whose shapes changed.
+
+    Older checkpoints scored quality from joint_tokens only. The current model scores
+    joint_tokens + candidate pose, so quality/success head input weights can be
+    intentionally re-initialized while preserving the backbone, PointNet, GRU and CVAE.
+    """
+    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    state = ckpt["model"]
+    current = model.state_dict()
+    compatible = {k: v for k, v in state.items() if k in current and current[k].shape == v.shape}
+    skipped = sorted(k for k, v in state.items() if k in current and current[k].shape != v.shape)
+    missing = sorted(k for k in current.keys() if k not in compatible)
+    model.load_state_dict(compatible, strict=False)
+    if skipped:
+        print(f"Checkpoint partial load: skipped shape-mismatched tensors: {skipped}")
+    extra_missing = [k for k in missing if k not in skipped]
+    if extra_missing:
+        print(f"Checkpoint partial load: kept random init for missing tensors: {extra_missing}")
+    return int(ckpt.get("epoch", 0)) + 1
 
 
 class MixedDataLoader:
@@ -206,12 +237,20 @@ class MixedDataLoader:
 
 
 @torch.no_grad()
-def run_val(model: GraspModel, loader: DataLoader, dev: torch.device, args: argparse.Namespace, phase: int) -> dict:
+def run_val(
+    model: GraspModel,
+    loader: DataLoader,
+    dev: torch.device,
+    args: argparse.Namespace,
+    phase: int,
+    kl_weight: float | None = None,
+) -> dict:
     model.eval()
+    kl_w = kl_weight if kl_weight is not None else args.kl_weight
     totals: dict[str, float] = {}
     n_total = 0
     for batch in loader:
-        _, info = run_batch(model, batch, dev, args, kl_weight=args.kl_weight, phase=phase)
+        _, info = run_batch(model, batch, dev, args, kl_weight=kl_w, phase=phase)
         bs = int(len(batch["target_pose"]))
         for k, v in info.items():
             totals[k] = totals.get(k, 0.0) + v * bs
@@ -243,14 +282,16 @@ def train_phase(
         opt, mode="min", factor=0.5, patience=args.lr_patience, min_lr=1e-6,
     )
 
-    CHECKPOINT_DIR.mkdir(exist_ok=True)
-    RESULTS_DIR.mkdir(exist_ok=True)
+    prefix = getattr(args, "checkpoint_prefix", None) or "grasp"
+    ckpt_dir = CHECKPOINT_DIR / prefix
+    run_dir  = RESULTS_DIR / prefix
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    run_dir.mkdir(parents=True, exist_ok=True)
     log: list[dict] = []
     best_val = float("inf")
     no_improve = 0
-    prefix = getattr(args, "checkpoint_prefix", None) or "grasp"
-    best_path = CHECKPOINT_DIR / f"{prefix}_phase{phase}_best.pt"
-    log_path = RESULTS_DIR / f"train_{prefix}_phase{phase}_log.json"
+    best_path = ckpt_dir / f"phase{phase}_best.pt"
+    log_path  = run_dir  / f"train_phase{phase}_log.json"
 
     for epoch in range(args.epochs):
         model.train()
@@ -280,26 +321,30 @@ def train_phase(
         val_total = entry["train_total"]
 
         if val_loader is not None:
-            vals = run_val(model, val_loader, dev, args, phase)
+            vals = run_val(model, val_loader, dev, args, phase, kl_weight=kl_w)
             entry.update({f"val_{k}": v for k, v in vals.items()})
             val_total = vals.get("total", val_total)
 
-        scheduler.step(val_total)
+        # B3: early stopping primary criterion = val_rec (reconstruction loss).
+        # contact_ratio is logged separately but does NOT drive early stopping to
+        # avoid the model overfitting contact at the cost of pose accuracy.
+        val_rec = entry.get("val_rec", val_total)
+        scheduler.step(val_rec)
 
         log.append(entry)
         log_path.write_text(json.dumps(log, indent=2))
         print(json.dumps(entry))
 
         ckpt = {"model": model.state_dict(), "args": vars(args), "epoch": start_epoch + epoch, "phase": phase}
-        torch.save(ckpt, CHECKPOINT_DIR / f"{prefix}_phase{phase}_latest.pt")
-        if val_total < best_val:
-            best_val = val_total
+        torch.save(ckpt, ckpt_dir / f"phase{phase}_latest.pt")
+        if val_rec < best_val:
+            best_val = val_rec
             no_improve = 0
             torch.save(ckpt, best_path)
         else:
             no_improve += 1
             if args.early_stopping > 0 and no_improve >= args.early_stopping:
-                print(f"Early stopping: {no_improve} epoch iyileşme yok (best_val={best_val:.4f})")
+                print(f"Early stopping: {no_improve} epoch val_rec iyileşme yok (best={best_val:.4f})")
                 break
 
     return {"best_val": best_val, "best_path": str(best_path)}
@@ -333,6 +378,21 @@ def main() -> None:
                         help="prefix for checkpoint filenames, used by orchestrate.py to separate experiments")
     parser.add_argument("--hot3d_split", choices=["train", "all"], default="train")
     parser.add_argument("--val_stride", type=int, default=8)
+    # ablation flags (A3)
+    parser.add_argument("--encoder_type", choices=["gru", "mlp"], default="gru",
+                        help="Temporal encoder type: gru=full GRU, mlp=single-frame linear (A3 ablation)")
+    parser.add_argument("--obj_encoder_type", choices=["pointnet", "bbox", "none"], default="pointnet",
+                        help="Object encoder type: pointnet/bbox/none (A3 ablation)")
+    parser.add_argument("--use_attention", type=lambda x: x.lower() != "false", default=True,
+                        help="Use self-attention over joints (A3 ablation)")
+    parser.add_argument("--use_film", type=lambda x: x.lower() != "false", default=True,
+                        help="Use FiLM conditioning vs concat+linear (A3 ablation)")
+    parser.add_argument("--use_success_head", type=lambda x: x.lower() != "false", default=True,
+                        help="Include success_head (Phase 3). Set false when Phase 3 labels absent.")
+    parser.add_argument("--augment", type=lambda x: x.lower() != "false", default=True,
+                        help="Enable data augmentation during training (B4 ablation)")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Global random seed for reproducibility (C4 multi-seed)")
     parser.add_argument("--oakink_replay_ratio", type=float, default=0.3,
                         help="Phase 2'de OakInk batch oranı (0=devre dışı, 0.3=%%30 OakInk)")
     parser.add_argument("--lr_patience", type=int, default=5,
@@ -341,15 +401,30 @@ def main() -> None:
                         help="Bu kadar epoch iyileşme yoksa dur (0=kapalı)")
     args = parser.parse_args()
 
-    model = GraspModel(hidden=args.hidden, z_dim=args.z_dim)
+    # C4: reproducible training across seeds
+    import random
+    import numpy as _np
+    random.seed(args.seed)
+    _np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+
+    model = GraspModel(
+        hidden=args.hidden,
+        z_dim=args.z_dim,
+        encoder_type=args.encoder_type,
+        obj_encoder_type=args.obj_encoder_type,
+        use_attention=args.use_attention,
+        use_film=args.use_film,
+        use_success_head=args.use_success_head,
+    )
     start_epoch = 0
     if args.checkpoint:
-        ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
-        model.load_state_dict(ckpt["model"])
-        start_epoch = int(ckpt.get("epoch", 0)) + 1
+        start_epoch = load_checkpoint_compatible(model, args.checkpoint)
 
     if args.phase == 1:
-        train_ds = OakInkStaticDataset(split="train", n_points=args.n_points, augment=True)
+        train_ds = OakInkStaticDataset(split="train", n_points=args.n_points, augment=args.augment)
         val_ds = OakInkStaticDataset(split="val", n_points=args.n_points, augment=False)
         train_loader = make_loader(train_ds, args.batch, True, args.workers, collate_oakink)
         val_loader = make_loader(val_ds, args.batch * 2, False, args.workers, collate_oakink)

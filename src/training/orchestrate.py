@@ -43,7 +43,7 @@ def run(cmd: list[str], dry_run: bool) -> int:
 
 
 def ckpt_path(name: str, phase: int, kind: str = "best") -> Path:
-    return CHECKPOINT_DIR / f"{name}_phase{phase}_{kind}.pt"
+    return CHECKPOINT_DIR / name / f"phase{phase}_{kind}.pt"
 
 
 def load_epoch(path: Path) -> int:
@@ -99,11 +99,11 @@ def build_eval_cmd(exp_name: str, ckpt: Path) -> list[str]:
         "--source", "both",
         "--split", "test",
         "--k", "5",
-        "--out", str(RESULTS_DIR / f"eval_{exp_name}.json"),
+        "--out", str(RESULTS_DIR / exp_name / "eval.json"),
     ]
 
 
-def run_experiment(exp: dict, dry_run: bool, extra_args: dict) -> dict:
+def run_experiment(exp: dict, dry_run: bool, extra_args: dict, args_max_phase: int | None = None) -> dict:
     name = exp["name"]
     phases = exp.get("phases", [1, 2, 3])
     phase_epochs = exp.get("phase_epochs", {})
@@ -119,6 +119,9 @@ def run_experiment(exp: dict, dry_run: bool, extra_args: dict) -> dict:
     last_good_ckpt: Path | None = None
 
     for phase in phases:
+        if args_max_phase and phase > args_max_phase:
+            print(f"  [phase {phase}] SKIP — max_phase={args_max_phase}", flush=True)
+            continue
         target_epochs = int(phase_epochs.get(str(phase), 30))
         status, resume_ckpt, remaining = phase_status(name, phase, target_epochs)
 
@@ -143,8 +146,10 @@ def run_experiment(exp: dict, dry_run: bool, extra_args: dict) -> dict:
             break  # stop this experiment; next orchestrate.py call resumes from partial checkpoint
         last_good_ckpt = ckpt_path(name, phase, "best")
 
+    run_dir = RESULTS_DIR / name
+
     # eval — skip if already done
-    eval_path = RESULTS_DIR / f"eval_{name}.json"
+    eval_path = run_dir / "eval.json"
     eval_result: dict = {}
     if last_good_ckpt and last_good_ckpt.exists():
         if eval_path.exists():
@@ -165,9 +170,9 @@ def run_experiment(exp: dict, dry_run: bool, extra_args: dict) -> dict:
         "timestamp": datetime.now().isoformat(),
     }
     if not dry_run:
-        RESULTS_DIR.mkdir(exist_ok=True)
-        (RESULTS_DIR / f"summary_{name}.json").write_text(json.dumps(summary, indent=2))
-        print(f"  [summary] → results/summary_{name}.json", flush=True)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "summary.json").write_text(json.dumps(summary, indent=2))
+        print(f"  [summary] → results/{name}/summary.json", flush=True)
     return summary
 
 
@@ -181,6 +186,11 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=0)
     parser.add_argument("--window", type=int, default=16)
     parser.add_argument("--n-points", type=int, default=1024)
+    parser.add_argument("--max-phase", type=int, default=None, dest="max_phase",
+                        help="stop after this phase (e.g. --max-phase 1 runs only phase 1)")
+    parser.add_argument("--seeds", type=int, nargs="*", default=None,
+                        help="C4 multi-seed: run each experiment multiple times with these seeds "
+                             "(e.g. --seeds 42 123 456). Eval outputs named eval_<name>_seed<N>.json")
     args = parser.parse_args()
 
     experiments = json.loads(args.experiments.read_text())
@@ -202,9 +212,19 @@ def main() -> None:
 
     all_summaries = []
     t_total = time.time()
+    seeds = args.seeds if args.seeds else [None]
     for exp in experiments:
-        summary = run_experiment(exp, args.dry_run, extra_args)
-        all_summaries.append(summary)
+        for seed in seeds:
+            seed_extra = dict(extra_args)
+            if seed is not None:
+                seed_extra["seed"] = seed
+                # rename experiment so checkpoints/evals don't overwrite each other
+                seed_exp = dict(exp)
+                seed_exp["name"] = f"{exp['name']}_seed{seed}"
+                summary = run_experiment(seed_exp, args.dry_run, seed_extra, args.max_phase)
+            else:
+                summary = run_experiment(exp, args.dry_run, extra_args, args.max_phase)
+            all_summaries.append(summary)
 
     master_path = RESULTS_DIR / "master_summary.json"
     if not args.dry_run:

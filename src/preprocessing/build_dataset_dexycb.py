@@ -26,7 +26,7 @@ import trimesh
 
 from utils.mano_right import ManoRight, _quat_to_R
 from utils import grasp_taxonomy as tax
-from preprocessing.build_hot3d_canonical_full import fingertip_aabb_dist, _rotmat_to_6d, CFG
+from preprocessing.build_hot3d_canonical_full import fingertip_aabb_dist, point_aabb_dist, _rotmat_to_6d, CFG
 
 _REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DEXYCB = os.path.join(_REPO, "data", "raw", "dexycb")
@@ -177,8 +177,9 @@ def main():
                     rel6d = _rotmat_to_6d(R_rel)
                     rel_vel = np.zeros(3) if prev_rel is None else (rel_pos - prev_rel) / DT
                     prev_rel = rel_pos
-                    dist = np.linalg.norm(rel_pos)
-                    if not np.isfinite(rel_pos).all() or dist > 2.0:
+                    dist = point_aabb_dist(f["wt"], f["t_obj"], f["q_obj"], bb[0], bb[1])
+                    rel_norm = np.linalg.norm(rel_pos)
+                    if not np.isfinite(rel_pos).all() or rel_norm > 2.0:
                         summ["nan_outlier"] += 1
                         continue
                     cols["rel_pos"].append(rel_pos)

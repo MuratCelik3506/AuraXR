@@ -8,7 +8,7 @@ namespace AuraXR.Demo
         public AuraXRHandRetargeter handRetargeter;
 
         [Header("Thresholds")]
-        public float farThresholdM = 0.10f;
+        public float farThresholdM = 0.04f;  // reduced from 0.10 — runtime mitigation for A1 (premature finger closure)
         public float nearThresholdM = 0.02f;
         public float releaseThresholdM = 0.05f;
         public int freeToTransitionFrames = 5;

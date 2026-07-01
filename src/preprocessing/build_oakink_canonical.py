@@ -242,20 +242,57 @@ def main() -> None:
     )
     print(f"Saved dataset.npz — pose: {pose_arr.shape}, obj_anno: {obj_anno_arr.shape}")
 
-    # split: by actor prefix
-    # derive actor from original file ordering (already shuffled by rng.choice)
-    # simple 80/10/10 random split
-    n = len(poses)
-    idx = rng.permutation(n)
-    n_val = max(1, int(n * 0.1))
-    n_test = max(1, int(n * 0.1))
+    # Object-level, category-stratified split (B2 fix).
+    # All samples of the same obj_name stay in the same partition → unseen-object test enabled.
+    # Also produce legacy sample-level split as "seen_test" for backwards-compatible comparison.
+    name_arr_np = np.array(obj_names)
+    cat_arr_np  = np.array(categories)
+
+    # --- object-level split (global shuffle, not per-category) ---
+    # Per-category stratification breaks when categories have <3 objects (all go to test).
+    # Simple global 70/15/15 split on unique objects is more robust for small datasets.
+    unique_objs = list(rng.permutation(np.unique(name_arr_np)))
+    n_objs = len(unique_objs)
+    n_test = max(1, round(n_objs * 0.15))
+    n_val  = max(1, round(n_objs * 0.15))
+    # Guarantee at least 1 train object
+    if n_test + n_val >= n_objs:
+        n_test = max(1, n_objs // 5)
+        n_val  = max(1, n_objs // 5)
+    obj_test  = unique_objs[:n_test]
+    obj_val   = unique_objs[n_test:n_test + n_val]
+    obj_train = unique_objs[n_test + n_val:]
+
+    obj_train_set = set(obj_train)
+    obj_val_set   = set(obj_val)
+    obj_test_set  = set(obj_test)
+
+    all_idx = np.arange(len(poses))
+    obj_split = {
+        "train":       all_idx[np.isin(name_arr_np, list(obj_train_set))].tolist(),
+        "val":         all_idx[np.isin(name_arr_np, list(obj_val_set))].tolist(),
+        "unseen_test": all_idx[np.isin(name_arr_np, list(obj_test_set))].tolist(),
+    }
+
+    # --- legacy sample-level split (seen_test) ---
+    idx_legacy = rng.permutation(len(poses))
+    n_val_leg  = max(1, int(len(poses) * 0.1))
+    n_test_leg = max(1, int(len(poses) * 0.1))
     split = {
-        "train": idx[n_test + n_val:].tolist(),
-        "val": idx[n_test:n_test + n_val].tolist(),
-        "test": idx[:n_test].tolist(),
+        "train":      idx_legacy[n_test_leg + n_val_leg:].tolist(),
+        "val":        idx_legacy[n_test_leg:n_test_leg + n_val_leg].tolist(),
+        "seen_test":  idx_legacy[:n_test_leg].tolist(),
+        # object-level partitions
+        "unseen_test":   obj_split["unseen_test"],
+        "obj_val":       obj_split["val"],
+        "obj_train":     obj_split["train"],
     }
     (OUT_DIR / "split.json").write_text(json.dumps(split, indent=2))
-    print(f"Split: {dict((k, len(v)) for k, v in split.items())}")
+    print(f"Split (sample-level): train={len(split['train'])} val={len(split['val'])} "
+          f"seen_test={len(split['seen_test'])}")
+    print(f"Split (object-level): obj_train={len(split['obj_train'])} obj_val={len(split['obj_val'])} "
+          f"unseen_test={len(split['unseen_test'])} "
+          f"(across {len(obj_train)} / {len(obj_val)} / {len(obj_test)} unique objects)")
 
     # stats
     train_idx = split["train"]

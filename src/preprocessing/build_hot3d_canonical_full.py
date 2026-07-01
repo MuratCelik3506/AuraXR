@@ -58,6 +58,14 @@ def fingertip_aabb_dist(tips_world, t_obj, q_obj, lo, hi):
     return np.linalg.norm(pl - clamped, axis=1)
 
 
+def point_aabb_dist(point_world, t_obj, q_obj, lo, hi):
+    """Tek nokta icin obje-lokal AABB en yakin yuzey mesafesi (ic=0)."""
+    R = _quat_to_R(q_obj)
+    pl = (point_world - t_obj) @ R
+    clamped = np.clip(pl, lo, hi)
+    return float(np.linalg.norm(pl - clamped))
+
+
 # --- sequence parsing (streaming) --------------------------------------------
 def parse_sequence(seq_dir):
     """yield (ts, right_hand_pose_dict, objects_dict, uid2name).
@@ -295,8 +303,9 @@ def run_build(categories):
                     dt = max(1e-6, (fr["ts"] - prev_ts) / 1e9)
                     rel_vel = (rel_pos - prev_rel) / dt
                 prev_rel = rel_pos; prev_ts = fr["ts"]
-                dist = np.linalg.norm(rel_pos)
-                if not np.isfinite(rel_pos).all() or dist > 2.0:
+                dist = point_aabb_dist(fr["wt"], t_obj, op[1], bb[0], bb[1])
+                rel_norm = np.linalg.norm(rel_pos)
+                if not np.isfinite(rel_pos).all() or rel_norm > 2.0:
                     summ["nan_outlier_counts"] += 1
                     summ["dropped_frames_by_reason"]["nan_or_outlier"] += 1
                     continue

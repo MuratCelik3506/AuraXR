@@ -36,7 +36,7 @@ def _matrix_to_axis_angle(R: np.ndarray) -> np.ndarray:
     from scipy.spatial.transform import Rotation
     return Rotation.from_matrix(R).as_rotvec().astype(np.float32)
 from preprocessing.quality_labels import compute_quality_label  # noqa: E402
-from utils.paths import OAKINK_CANON  # noqa: E402
+from utils.paths import HOT3D_CANON, OAKINK_CANON  # noqa: E402
 
 
 class OakInkStaticDataset(Dataset):
@@ -49,9 +49,11 @@ class OakInkStaticDataset(Dataset):
         n_points: int = DEFAULT_N_POINTS,
         augment: bool = True,
         seed: int = 42,
+        frame_feat_stats_root: str | Path | None = HOT3D_CANON,
     ) -> None:
-        if split not in {"train", "val", "test"}:
-            raise ValueError(f"split must be train/val/test, got {split}")
+        _valid_splits = {"train", "val", "test", "seen_test", "unseen_test", "obj_train", "obj_val"}
+        if split not in _valid_splits:
+            raise ValueError(f"split must be one of {_valid_splits}, got {split}")
         self.root = Path(root)
         self.split = split
         self.n_points = n_points
@@ -94,7 +96,9 @@ class OakInkStaticDataset(Dataset):
 
         with split_path.open() as f:
             split_data = json.load(f)
-        self.indices = np.asarray(split_data[split], dtype=np.int64)
+        # "test" is legacy alias for "seen_test" in new object-level splits
+        _key = "seen_test" if (split == "test" and "test" not in split_data and "seen_test" in split_data) else split
+        self.indices = np.asarray(split_data[_key], dtype=np.int64)
 
         with stats_path.open() as f:
             raw_stats = json.load(f)
@@ -105,6 +109,18 @@ class OakInkStaticDataset(Dataset):
             except (TypeError, ValueError):
                 # Keep stats.json free to carry metadata such as input_feature_order.
                 continue
+
+        # frame_feat normalization must use HOT3D stats so Phase 2 mixed batches share
+        # the same input distribution. OakInk's own input_mean/std differ (max Δstd≈0.77).
+        if frame_feat_stats_root is not None:
+            hot3d_stats_path = Path(frame_feat_stats_root) / "stats.json"
+            if hot3d_stats_path.exists():
+                with hot3d_stats_path.open() as f:
+                    hot3d_raw = json.load(f)
+                for key in ("input_mean", "input_std"):
+                    if key in hot3d_raw:
+                        self.stats[key] = np.asarray(hot3d_raw[key], dtype=np.float32)
+
         self.obj_dir = self.root / "obj_pts"
         self._point_cache: dict[str, np.ndarray] = {}
 

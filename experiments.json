@@ -3,7 +3,7 @@
     "name": "full",
     "description": "Full model: self-attention + dual heads + vel/acc loss (B4/B7/B8)",
     "phases": [1, 2],
-    "phase_epochs": {"1": 30, "2": 50},
+    "phase_epochs": {"1": 50, "2": 50},
     "_phase3_disabled": "success_label absent in HOT3D NPZ — re-enable when annotation pipeline is ready",
     "args": {
       "hidden": 256,
@@ -14,14 +14,15 @@
       "quality_weight": 0.1,
       "success_weight": 0.1,
       "contact_weight": 0.05,
-      "penetration_weight": 0.1
+      "penetration_weight": 0.1,
+      "use_success_head": false
     }
   },
   {
     "name": "ablation_no_vel",
     "description": "Ablation: no GT-velocity/acceleration loss (B8 off)",
     "phases": [1, 2],
-    "phase_epochs": {"1": 30, "2": 50},
+    "phase_epochs": {"1": 50, "2": 50},
     "args": {
       "hidden": 256,
       "z_dim": 64,
@@ -48,6 +49,274 @@
       "quality_weight": 0.1,
       "success_weight": 0.0,
       "contact_weight": 0.05,
+      "penetration_weight": 0.1
+    }
+  },
+  {
+    "name": "ablation_singleframe_mlp",
+    "description": "A3 temporal ablation: single-frame MLP encoder (no GRU, no history)",
+    "phases": [1, 2],
+    "phase_epochs": {"1": 50, "2": 50},
+    "args": {
+      "hidden": 256,
+      "z_dim": 64,
+      "kl_warmup_epochs": 10,
+      "encoder_type": "mlp",
+      "window": 1,
+      "vel_weight": 0.0,
+      "acc_weight": 0.0,
+      "quality_weight": 0.1,
+      "success_weight": 0.0,
+      "contact_weight": 0.05,
+      "penetration_weight": 0.1
+    }
+  },
+  {
+    "name": "ablation_gru_t1",
+    "description": "A3 temporal ablation: GRU with window=1 (architecture present, no history)",
+    "phases": [1, 2],
+    "phase_epochs": {"1": 50, "2": 50},
+    "args": {
+      "hidden": 256,
+      "z_dim": 64,
+      "kl_warmup_epochs": 10,
+      "encoder_type": "gru",
+      "window": 1,
+      "vel_weight": 0.0,
+      "acc_weight": 0.0,
+      "quality_weight": 0.1,
+      "success_weight": 0.0,
+      "contact_weight": 0.05,
+      "penetration_weight": 0.1
+    }
+  },
+  {
+    "name": "ablation_no_obj",
+    "description": "A3 geometry ablation: no object encoder (pose-only baseline)",
+    "phases": [1, 2],
+    "phase_epochs": {"1": 50, "2": 50},
+    "args": {
+      "hidden": 256,
+      "z_dim": 64,
+      "kl_warmup_epochs": 10,
+      "obj_encoder_type": "none",
+      "vel_weight": 0.1,
+      "acc_weight": 0.05,
+      "quality_weight": 0.1,
+      "success_weight": 0.0,
+      "contact_weight": 0.05,
+      "penetration_weight": 0.1
+    }
+  },
+  {
+    "name": "ablation_bbox_obj",
+    "description": "A3 geometry ablation: bounding-box object encoder (no PointNet)",
+    "phases": [1, 2],
+    "phase_epochs": {"1": 50, "2": 50},
+    "args": {
+      "hidden": 256,
+      "z_dim": 64,
+      "kl_warmup_epochs": 10,
+      "obj_encoder_type": "bbox",
+      "vel_weight": 0.1,
+      "acc_weight": 0.05,
+      "quality_weight": 0.1,
+      "success_weight": 0.0,
+      "contact_weight": 0.05,
+      "penetration_weight": 0.1
+    }
+  },
+  {
+    "name": "ablation_no_attention",
+    "description": "A3 attention ablation: per-joint independent MLP instead of self-attention",
+    "phases": [1, 2],
+    "phase_epochs": {"1": 50, "2": 50},
+    "args": {
+      "hidden": 256,
+      "z_dim": 64,
+      "kl_warmup_epochs": 10,
+      "use_attention": false,
+      "vel_weight": 0.1,
+      "acc_weight": 0.05,
+      "quality_weight": 0.1,
+      "success_weight": 0.0,
+      "contact_weight": 0.05,
+      "penetration_weight": 0.1
+    }
+  },
+  {
+    "name": "ablation_no_film",
+    "description": "A3 FiLM ablation: concat+linear instead of FiLM conditioning",
+    "phases": [1, 2],
+    "phase_epochs": {"1": 50, "2": 50},
+    "args": {
+      "hidden": 256,
+      "z_dim": 64,
+      "kl_warmup_epochs": 10,
+      "use_film": false,
+      "vel_weight": 0.1,
+      "acc_weight": 0.05,
+      "quality_weight": 0.1,
+      "success_weight": 0.0,
+      "contact_weight": 0.05,
+      "penetration_weight": 0.1
+    }
+  },
+  {
+    "name": "ablation_no_aug",
+    "description": "B4 augmentation ablation: training without data augmentation",
+    "phases": [1, 2],
+    "phase_epochs": {"1": 50, "2": 50},
+    "args": {
+      "hidden": 256,
+      "z_dim": 64,
+      "kl_warmup_epochs": 10,
+      "augment": false,
+      "vel_weight": 0.1,
+      "acc_weight": 0.05,
+      "quality_weight": 0.1,
+      "success_weight": 0.0,
+      "contact_weight": 0.05,
+      "penetration_weight": 0.1
+    }
+  },
+  {
+    "name": "kl_sweep_0001",
+    "description": "A2 KL sweep: kl_weight=0.001 for CVAE diversity analysis",
+    "phases": [1],
+    "phase_epochs": {"1": 50},
+    "args": {
+      "hidden": 256,
+      "z_dim": 64,
+      "kl_weight": 0.001,
+      "kl_warmup_epochs": 10,
+      "vel_weight": 0.0,
+      "acc_weight": 0.0,
+      "quality_weight": 0.1,
+      "success_weight": 0.0,
+      "contact_weight": 0.05,
+      "penetration_weight": 0.1
+    }
+  },
+  {
+    "name": "kl_sweep_001",
+    "description": "A2 KL sweep: kl_weight=0.01 (baseline)",
+    "phases": [1],
+    "phase_epochs": {"1": 50},
+    "args": {
+      "hidden": 256,
+      "z_dim": 64,
+      "kl_weight": 0.01,
+      "kl_warmup_epochs": 10,
+      "vel_weight": 0.0,
+      "acc_weight": 0.0,
+      "quality_weight": 0.1,
+      "success_weight": 0.0,
+      "contact_weight": 0.05,
+      "penetration_weight": 0.1
+    }
+  },
+  {
+    "name": "kl_sweep_005",
+    "description": "A2 KL sweep: kl_weight=0.05",
+    "phases": [1],
+    "phase_epochs": {"1": 50},
+    "args": {
+      "hidden": 256,
+      "z_dim": 64,
+      "kl_weight": 0.05,
+      "kl_warmup_epochs": 10,
+      "vel_weight": 0.0,
+      "acc_weight": 0.0,
+      "quality_weight": 0.1,
+      "success_weight": 0.0,
+      "contact_weight": 0.05,
+      "penetration_weight": 0.1
+    }
+  },
+  {
+    "name": "kl_sweep_01",
+    "description": "A2 KL sweep: kl_weight=0.1",
+    "phases": [1],
+    "phase_epochs": {"1": 50},
+    "args": {
+      "hidden": 256,
+      "z_dim": 64,
+      "kl_weight": 0.1,
+      "kl_warmup_epochs": 10,
+      "vel_weight": 0.0,
+      "acc_weight": 0.0,
+      "quality_weight": 0.1,
+      "success_weight": 0.0,
+      "contact_weight": 0.05,
+      "penetration_weight": 0.1
+    }
+  },
+  {
+    "name": "contact_weight_sweep_03",
+    "description": "B1 contact_weight sweep: contact_weight=0.3",
+    "phases": [1, 2],
+    "phase_epochs": {"1": 50, "2": 50},
+    "args": {
+      "hidden": 256,
+      "z_dim": 64,
+      "kl_warmup_epochs": 10,
+      "contact_weight": 0.3,
+      "vel_weight": 0.1,
+      "acc_weight": 0.05,
+      "quality_weight": 0.1,
+      "success_weight": 0.0,
+      "penetration_weight": 0.1
+    }
+  },
+  {
+    "name": "contact_weight_sweep_07",
+    "description": "B1 contact_weight sweep: contact_weight=0.7",
+    "phases": [1, 2],
+    "phase_epochs": {"1": 50, "2": 50},
+    "args": {
+      "hidden": 256,
+      "z_dim": 64,
+      "kl_warmup_epochs": 10,
+      "contact_weight": 0.7,
+      "vel_weight": 0.1,
+      "acc_weight": 0.05,
+      "quality_weight": 0.1,
+      "success_weight": 0.0,
+      "penetration_weight": 0.1
+    }
+  },
+  {
+    "name": "contact_weight_sweep_10",
+    "description": "B1 contact_weight sweep: contact_weight=1.0",
+    "phases": [1, 2],
+    "phase_epochs": {"1": 50, "2": 50},
+    "args": {
+      "hidden": 256,
+      "z_dim": 64,
+      "kl_warmup_epochs": 10,
+      "contact_weight": 1.0,
+      "vel_weight": 0.1,
+      "acc_weight": 0.05,
+      "quality_weight": 0.1,
+      "success_weight": 0.0,
+      "penetration_weight": 0.1
+    }
+  },
+  {
+    "name": "contact_weight_sweep_20",
+    "description": "B1 contact_weight sweep: contact_weight=2.0",
+    "phases": [1, 2],
+    "phase_epochs": {"1": 50, "2": 50},
+    "args": {
+      "hidden": 256,
+      "z_dim": 64,
+      "kl_warmup_epochs": 10,
+      "contact_weight": 2.0,
+      "vel_weight": 0.1,
+      "acc_weight": 0.05,
+      "quality_weight": 0.1,
+      "success_weight": 0.0,
       "penetration_weight": 0.1
     }
   }

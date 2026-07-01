@@ -22,7 +22,7 @@ if str(_SRC) not in sys.path:
 
 from model.grasp_model import _LOWER, _UPPER  # noqa: E402
 from model.mano_fk import axis_angle_to_matrix, fingertip_positions  # noqa: E402
-from model.model_io import CONTACT_THRESHOLD_M  # noqa: E402
+from model.model_io import EVAL_CONTACT_THRESHOLD_M  # noqa: E402
 
 
 def angle_mae(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -85,7 +85,7 @@ def joint_limit_saturation_rate(pred: torch.Tensor, eps: float = 1e-3) -> torch.
     return (near_lower | near_upper).float().mean()
 
 
-def contact_ratio(pred: torch.Tensor, obj_pts: torch.Tensor, threshold_m: float = CONTACT_THRESHOLD_M) -> torch.Tensor:
+def contact_ratio(pred: torch.Tensor, obj_pts: torch.Tensor, threshold_m: float = EVAL_CONTACT_THRESHOLD_M) -> torch.Tensor:
     """B10.4 -- fraction of fingertips within `threshold_m` of the nearest object point."""
     tips = fingertip_positions(pred)  # (B,5,3)
     dists = torch.cdist(tips, obj_pts).min(dim=-1).values  # (B,5)

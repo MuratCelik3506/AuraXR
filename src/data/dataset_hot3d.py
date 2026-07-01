@@ -208,14 +208,27 @@ class Hot3DTemporalDataset(Dataset):
         return pts_wrist.astype(np.float32)
 
     def _shifted_frame_feat(self, feat: np.ndarray, start: int, shift: int) -> np.ndarray:
-        """Window of frame features shifted `shift` frames back. Pads by repeating first row."""
-        s = max(0, start - shift)
-        e = max(self.window, start + self.window - shift)
-        window = feat[s : s + self.window]
-        if len(window) < self.window:
-            pad = np.repeat(feat[:1], self.window - len(window), axis=0)
-            window = np.concatenate([pad, window], axis=0)
-        return window.astype(np.float32)
+        """Window shifted `shift` frames back. Pads start with first row.
+
+        Correct behaviour: produce feat[start-shift : start-shift+window], clamping the
+        left boundary to 0 and filling the gap with the first available frame.
+        Example — start=0, shift=1, window=3: target window is [-1,0,1], index -1 doesn't
+        exist, so output is [feat[0], feat[0], feat[1]]  (one pad at front).
+        """
+        src_start = start - shift          # may be negative
+        src_end   = src_start + self.window
+        # Clamp to valid range
+        valid_start = max(0, src_start)
+        valid_end   = min(len(feat), src_end)
+        chunk = feat[valid_start:valid_end]
+        # Pad left if src_start < 0
+        n_left = max(0, -src_start)
+        if n_left > 0:
+            chunk = np.concatenate([np.repeat(feat[:1], n_left, axis=0), chunk], axis=0)
+        # Pad right if sequence too short (shouldn't happen given _index_windows guards)
+        if len(chunk) < self.window:
+            chunk = np.concatenate([chunk, np.repeat(feat[-1:], self.window - len(chunk), axis=0)], axis=0)
+        return chunk.astype(np.float32)
 
     def __getitem__(self, item: int) -> dict[str, Any]:
         path, start, target = self.samples[item]
@@ -228,7 +241,10 @@ class Hot3DTemporalDataset(Dataset):
         prev_frame_feat  = self._shifted_frame_feat(feat_all, start, shift=1)
         prev2_frame_feat = self._shifted_frame_feat(feat_all, start, shift=2)
         finger_hist = data["finger_aa45"][start:end].astype(np.float32)
-        contact = data["contact_flag"][start:end].astype(np.float32).reshape(self.window, 1)
+        contact_all = data["contact_flag"].astype(np.float32).reshape(-1, 1)
+        contact = contact_all[start:end].astype(np.float32)
+        prev_contact = self._shifted_frame_feat(contact_all, start, shift=1)
+        prev2_contact = self._shifted_frame_feat(contact_all, start, shift=2)
         target_pose = data["finger_aa45"][target].astype(np.float32)
         prev_pose = data["finger_aa45"][max(target - 1, 0)].astype(np.float32)
         prev2_pose = data["finger_aa45"][max(target - 2, 0)].astype(np.float32)
@@ -274,6 +290,8 @@ class Hot3DTemporalDataset(Dataset):
             "prev2_frame_feat": torch.from_numpy(prev2_frame_feat),
             "finger_hist": torch.from_numpy(finger_hist),
             "contact_flag": torch.from_numpy(contact),
+            "prev_contact_flag": torch.from_numpy(prev_contact),
+            "prev2_contact_flag": torch.from_numpy(prev2_contact),
             "target_pose": target_pose_t,
             "prev_pose": torch.from_numpy(prev_pose),
             "prev2_pose": torch.from_numpy(prev2_pose),
@@ -293,6 +311,8 @@ def collate_hot3d(batch: list[dict[str, Any]]) -> dict[str, Any]:
         "prev2_frame_feat",
         "finger_hist",
         "contact_flag",
+        "prev_contact_flag",
+        "prev2_contact_flag",
         "target_pose",
         "prev_pose",
         "prev2_pose",

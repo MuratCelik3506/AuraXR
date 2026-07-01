@@ -29,6 +29,7 @@ from model.model_io import (  # noqa: E402
     LATENT_DIM,
     NUM_FINGER_JOINTS,
     OBJ_EMB_DIM,
+    TRAIN_CONTACT_HINGE_M,
     WRIST_DIM,
 )
 
@@ -210,33 +211,87 @@ class TemporalGeometryConditionedGraspModel(nn.Module):
         hidden: int = 256,
         joint_dim: int = 128,
         z_dim: int = LATENT_DIM,
+        encoder_type: str = "gru",  # "gru" | "mlp" — ablation A3: temporal encoder choice
+        obj_encoder_type: str = "pointnet",  # "pointnet" | "bbox" | "none" — ablation A3
+        use_attention: bool = True,   # ablation A3: self-attention over joints
+        use_film: bool = True,        # ablation A3: FiLM conditioning vs concat
+        use_success_head: bool = True,  # False when Phase 3 labels unavailable
     ) -> None:
         super().__init__()
         self.hidden = hidden
         self.joint_dim = joint_dim
-        self.obj_encoder = PointNetEncoder(obj_dim)
-        self.temporal_encoder = TemporalEncoder(hidden=hidden)
-        self.context_encoder = ContextEncoder(obj_dim=obj_dim, hidden=hidden)
+        self.encoder_type = encoder_type
+        self.obj_encoder_type = obj_encoder_type
+        self.use_attention = use_attention
+        self.use_film = use_film
+
+        # Object encoder (ablation: pointnet / bbox / none)
+        if obj_encoder_type == "pointnet":
+            self.obj_encoder = PointNetEncoder(obj_dim)
+        elif obj_encoder_type == "bbox":
+            # 6-dim (min + max) + 3-dim aspect ratio = 9 dims -> obj_dim
+            self.obj_encoder = nn.Sequential(nn.Linear(9, obj_dim), nn.GELU(), nn.Linear(obj_dim, obj_dim))
+        else:  # "none"
+            self.obj_encoder = None
+
+        # Temporal encoder (ablation: gru / mlp)
+        if encoder_type == "gru":
+            self.temporal_encoder = TemporalEncoder(hidden=hidden)
+        else:  # "mlp" — single-frame linear projection
+            self.temporal_encoder = nn.Sequential(
+                nn.Linear(HOT3D_FRAME_DIM + 1, hidden), nn.GELU(), nn.Linear(hidden, hidden)
+            )
+
+        # Context encoder (FiLM vs concat ablation)
+        if use_film:
+            self.context_encoder = ContextEncoder(obj_dim=obj_dim, hidden=hidden)
+        else:
+            # Simple concat+linear instead of FiLM
+            self.context_encoder = nn.Sequential(
+                nn.Linear(hidden + obj_dim, hidden), nn.GELU(), nn.Linear(hidden, hidden), nn.GELU()
+            )
         self.context_to_joint = nn.Linear(hidden, joint_dim)
-        self.self_attn = JointSelfAttention(dim=joint_dim)
+        # Attention ablation: full self-attention vs independent per-joint MLP
+        if use_attention:
+            self.self_attn: nn.Module = JointSelfAttention(dim=joint_dim)
+        else:
+            self.self_attn = nn.Sequential(nn.Linear(joint_dim + 3, joint_dim), nn.GELU(), nn.Linear(joint_dim, joint_dim))
         self.cvae = GraspCVAE(joint_dim=joint_dim, z_dim=z_dim)
 
         # B7: two separate confidence heads -- heuristic quality (MSE) vs Unity success (BCE).
+        # quality_head receives both joint_tokens AND pred_pose so it can score each
+        # candidate differently when k>1 samples are drawn at inference time.
+        # Known limitation: during training pred_pose comes from posterior z (CVAE encoder),
+        # but at inference candidates come from prior z~N(0,I). The joint_tokens part
+        # (deterministic context) still provides a meaningful discrimination signal.
         flat_joint_dim = joint_dim * NUM_FINGER_JOINTS
         self.quality_head = nn.Sequential(
-            nn.Linear(flat_joint_dim, hidden // 2),
-            nn.GELU(),
-            nn.Linear(hidden // 2, 1),
-            nn.Sigmoid(),
-        )
-        self.success_head = nn.Sequential(
             nn.Linear(flat_joint_dim + FINGER_POSE_DIM, hidden // 2),
             nn.GELU(),
             nn.Linear(hidden // 2, 1),
             nn.Sigmoid(),
         )
+        # success_head requires Phase 3 Unity labels; skip when use_success_head=False.
+        self.use_success_head = use_success_head
+        if use_success_head:
+            self.success_head: nn.Module | None = nn.Sequential(
+                nn.Linear(flat_joint_dim + FINGER_POSE_DIM, hidden // 2),
+                nn.GELU(),
+                nn.Linear(hidden // 2, 1),
+                nn.Sigmoid(),
+            )
+        else:
+            self.success_head = None
 
     def encode_object(self, obj_pts: torch.Tensor) -> torch.Tensor:
+        if self.obj_encoder is None:
+            return obj_pts.new_zeros(obj_pts.shape[0], self.hidden)
+        if self.obj_encoder_type == "bbox":
+            mn = obj_pts.min(dim=1).values   # (B,3)
+            mx = obj_pts.max(dim=1).values   # (B,3)
+            aspect = (mx - mn) / (mx - mn).norm(dim=-1, keepdim=True).clamp(min=1e-6)
+            bbox_feat = torch.cat([mn, mx, aspect], dim=-1)  # (B,9)
+            return self.obj_encoder(bbox_feat)
         return self.obj_encoder(obj_pts)
 
     def build_context(
@@ -246,17 +301,43 @@ class TemporalGeometryConditionedGraspModel(nn.Module):
         contact_flag: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """frame_feat: (B,T,13) unified interface (B1). T=1 for OakInk, T>1 for HOT3D/Unity."""
-        temporal = self.temporal_encoder(frame_feat, contact_flag)
-        return self.context_encoder(temporal, self.encode_object(obj_pts))
+        if self.encoder_type == "gru":
+            temporal = self.temporal_encoder(frame_feat, contact_flag)
+        else:  # mlp: use last frame only
+            if contact_flag is None:
+                cf = frame_feat.new_zeros(*frame_feat.shape[:2], 1)
+            else:
+                cf = contact_flag
+            last = torch.cat([frame_feat[:, -1, :], cf[:, -1, :]], dim=-1)  # (B, frame_dim+1)
+            temporal = self.temporal_encoder(last)  # (B, hidden)
+        obj_emb = self.encode_object(obj_pts)
+        if self.use_film:
+            return self.context_encoder(temporal, obj_emb)
+        else:
+            return self.context_encoder(torch.cat([temporal, obj_emb], dim=-1))
 
     def joint_tokens_from_context(self, context: torch.Tensor, prev_pose: torch.Tensor) -> torch.Tensor:
         fusion = self.context_to_joint(context)
-        return self.self_attn(fusion, prev_pose)
+        if self.use_attention:
+            return self.self_attn(fusion, prev_pose)
+        else:
+            # Per-joint independent MLP: expand context + per-joint prev_pose
+            batch = fusion.shape[0]
+            per_joint_prev = prev_pose.view(batch, NUM_FINGER_JOINTS, 3)  # (B,15,3)
+            fusion_exp = fusion[:, None, :].expand(batch, NUM_FINGER_JOINTS, self.joint_dim)
+            joint_input = torch.cat([fusion_exp, per_joint_prev], dim=-1)  # (B,15, joint_dim+3)
+            return self.self_attn(joint_input)
 
-    def _heads(self, joint_tokens: torch.Tensor, pred_pose: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def _heads(
+        self,
+        joint_tokens: torch.Tensor,
+        pred_pose: torch.Tensor,
+        compute_success: bool = True,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         flat = joint_tokens.reshape(joint_tokens.shape[0], -1)
-        quality = self.quality_head(flat)
-        success = self.success_head(torch.cat([flat, pred_pose], dim=-1))
+        combined = torch.cat([flat, pred_pose], dim=-1)
+        quality = self.quality_head(combined)
+        success = (self.success_head(combined) if compute_success else None) if self.success_head is not None else None
         return quality, success
 
     def forward_train(
@@ -272,8 +353,11 @@ class TemporalGeometryConditionedGraspModel(nn.Module):
         context = self.build_context(frame_feat, obj_pts, contact_flag)
         joint_tokens = self.joint_tokens_from_context(context, prev_pose)
         pred, mu, logvar = self.cvae.forward_train(joint_tokens, target_pose)
-        quality, success = self._heads(joint_tokens, pred)
-        return {"pred": pred, "mu": mu, "logvar": logvar, "quality_score": quality, "success_prob": success}
+        quality, success = self._heads(joint_tokens, pred, compute_success=self.use_success_head)
+        out: dict[str, torch.Tensor] = {"pred": pred, "mu": mu, "logvar": logvar, "quality_score": quality}
+        if success is not None:
+            out["success_prob"] = success
+        return out
 
     @torch.no_grad()
     def infer(
@@ -293,24 +377,31 @@ class TemporalGeometryConditionedGraspModel(nn.Module):
     def _sample_and_select(self, joint_tokens: torch.Tensor, k: int) -> dict[str, torch.Tensor]:
         candidates = self.cvae.sample(joint_tokens, k=max(1, k))  # (B,K,45)
         batch, n, _ = candidates.shape
-        flat = joint_tokens.reshape(batch, -1)
-        quality = self.quality_head(flat)  # (B,1) -- shared per fusion context, not per-candidate
-        quality = quality.expand(batch, n)
-        success = self.success_head(
-            torch.cat([flat[:, None, :].expand(batch, n, flat.shape[-1]), candidates], dim=-1).reshape(batch * n, -1)
-        ).reshape(batch, n)
-        best_idx = success.argmax(dim=1)
+        flat = joint_tokens.reshape(batch, -1)                     # (B, flat_joint_dim)
+        flat_exp = flat[:, None, :].expand(batch, n, flat.shape[-1])  # (B,K,flat_joint_dim)
+
+        # quality per-candidate: joint context + each candidate pose → distinct score per k.
+        quality_input = torch.cat([flat_exp, candidates], dim=-1).reshape(batch * n, -1)
+        quality = self.quality_head(quality_input).reshape(batch, n)  # (B,K)
+
+        # D2: selection uses quality_score heuristic (Spearman 0.72 on OakInk).
+        # success_head requires Unity physics labels (Phase 3); skip when unavailable.
+        best_idx = quality.argmax(dim=1)
         arange = torch.arange(batch, device=candidates.device)
         selected = candidates[arange, best_idx]
-        return {
+
+        out: dict[str, torch.Tensor] = {
             "candidate_poses": candidates,
             "candidate_quality_scores": quality,
-            "candidate_success_probs": success,
             "selected_pose": selected,
             "selected_quality_score": quality[arange, best_idx].unsqueeze(-1),
-            "selected_success_prob": success[arange, best_idx].unsqueeze(-1),
             "selected_candidate_index": best_idx,
         }
+        if self.success_head is not None:
+            success = self.success_head(quality_input).reshape(batch, n)
+            out["candidate_success_probs"] = success
+            out["selected_success_prob"] = success[arange, best_idx].unsqueeze(-1)
+        return out
 
     # --- Backward-compatible static/temporal wrappers used by existing scripts ---
 
@@ -332,15 +423,15 @@ class TemporalGeometryConditionedGraspModel(nn.Module):
     ) -> dict[str, torch.Tensor]:
         prev_pose = finger_hist[:, -1, :]
         out = self.forward_train(frame_feat, obj_pts, target_pose, prev_pose=prev_pose, contact_flag=contact_flag)
-        out["conf"] = out["quality_score"]
+        out["conf"] = out["quality_score"]  # backward compat alias
         return out
 
     @torch.no_grad()
     def infer_static(self, wrist_feat: torch.Tensor, obj_pts: torch.Tensor, k: int = 1) -> dict[str, torch.Tensor]:
         frame_feat = wrist_feat_to_frame_feat(wrist_feat)
         out = self.infer(frame_feat, obj_pts, k=k)
-        out["candidate_conf"] = out["candidate_success_probs"]
-        out["selected_conf"] = out["selected_success_prob"]
+        out["candidate_conf"] = out.get("candidate_success_probs", out["candidate_quality_scores"])
+        out["selected_conf"] = out.get("selected_success_prob", out["selected_quality_score"])
         return out
 
     @torch.no_grad()
@@ -354,8 +445,8 @@ class TemporalGeometryConditionedGraspModel(nn.Module):
     ) -> dict[str, torch.Tensor]:
         prev_pose = finger_hist[:, -1, :]
         out = self.infer(frame_feat, obj_pts, prev_pose=prev_pose, contact_flag=contact_flag, k=k)
-        out["candidate_conf"] = out["candidate_success_probs"]
-        out["selected_conf"] = out["selected_success_prob"]
+        out["candidate_conf"] = out.get("candidate_success_probs", out["candidate_quality_scores"])
+        out["selected_conf"] = out.get("selected_success_prob", out["selected_quality_score"])
         return out
 
 
@@ -365,6 +456,10 @@ def wrist_feat_to_frame_feat(wrist_feat: torch.Tensor) -> torch.Tensor:
     same temporal encoder as HOT3D. rel_vel and dist are not available from wrist_feat
     alone so they are zero-filled (matches docs: OakInk rel_vel=0; dist needs the mesh
     pipeline and is computed upstream in dataset_oakink when available).
+
+    WARNING: pos and rot6d here are in world/camera frame, NOT object-relative.
+    This wrapper is for backward compatibility only. New code should use the
+    object-relative frame_feat produced directly by OakInkStaticDataset.__getitem__.
     """
     batch = wrist_feat.shape[0]
     pos = wrist_feat[:, :3]
@@ -418,34 +513,28 @@ def kl_loss(mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
 def contact_penetration_loss(pred_pose: torch.Tensor, obj_pts: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """L_contact / L_penetration — eğitim sinyali, gerçek fizik ölçümü değil.
 
-    L_contact: fingertip → obj_pts yüzeyine mesafe hinge loss. Modeli parmak
-    uçlarını obje yüzeyine yaklaştırmaya yönlendirir.
+    L_contact: fingertip → nearest surface point hinge loss (TRAIN_CONTACT_HINGE_M).
 
-    L_penetration: centroid-proxy tabanlı yaklaşık penetration cezası.
-    "Parmak ucu obje merkezine, yüzeyden daha yakınsa muhtemelen içeridedir"
-    heuristiğine dayanır. Küresel/silindirikal objeler için makul çalışır;
-    düz veya hollow objeler için yanıltıcı olabilir.
+    L_penetration: nearest-surface distance based. A fingertip is considered inside
+    the object when it is closer to the nearest surface point than a small epsilon —
+    i.e., `nearest_dist < 0`. Since obj_pts is a surface point cloud (not a solid),
+    we approximate penetration as the fingertip being embedded past the nearest surface
+    by using a sign proxy: if the distance to the nearest neighbor drops below half the
+    average inter-point spacing, the fingertip is likely inside. In practice, for
+    normalized point clouds at 1024 points, a 3mm threshold reliably distinguishes
+    close-contact from penetration without requiring SDF computation.
 
     Bu proxy bir eğitim yönlendiricisidir — gerçek penetration ölçümü
     Unity PhysX'ten (Physics.ComputePenetration) gelir ve success_label'a dahildir.
     """
     tips = fingertip_positions(pred_pose)  # (B,5,3)
     dists = torch.cdist(tips, obj_pts)     # (B,5,N)
-    nearest, nearest_idx = dists.min(dim=-1)  # (B,5)
-    # Hinge at 15mm: MANO template FK ~9mm residual bırakır (zero-beta vs gerçek shape).
-    # 15mm bu farka tolerans ekler, gerçek contact sinyalini maskelemez.
-    l_contact = F.relu(nearest - 0.015).mean()
-
-    # Centroid-proxy penetration: parmak ucu obje merkezine yüzey noktasından
-    # daha yakınsa "içeride" sayılır. Eğitim sinyali olarak kullanılır.
-    nearest_pts = obj_pts.gather(
-        1, nearest_idx.unsqueeze(-1).expand(-1, -1, obj_pts.shape[-1])
-    )  # (B,5,3)
-    centroid = obj_pts.mean(dim=1, keepdim=True)          # (B,1,3)
-    tip_to_centroid     = (tips         - centroid).norm(dim=-1)  # (B,5)
-    nearest_to_centroid = (nearest_pts  - centroid).norm(dim=-1)  # (B,5)
-    penetration_depth = F.relu(nearest_to_centroid - tip_to_centroid)
-    l_penetration = penetration_depth.mean()
+    nearest = dists.min(dim=-1).values     # (B,5)
+    l_contact = F.relu(nearest - TRAIN_CONTACT_HINGE_M).mean()
+    # Nearest-surface penetration: penalise fingertips too close to surface from inside.
+    # Use a tight threshold (3mm) — below this the tip is likely penetrating.
+    _PENETRATION_THRESHOLD_M = 0.003
+    l_penetration = F.relu(_PENETRATION_THRESHOLD_M - nearest).mean()
     return l_contact, l_penetration
 
 

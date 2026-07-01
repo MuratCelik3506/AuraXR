@@ -12,6 +12,9 @@ namespace AuraXR.Demo
         public Transform wrist;
         [Tooltip("Optional palm/fingertip probes used for HUD distance and contact. The wrist transform still drives the model pose input.")]
         public Transform[] contactProbes;
+        [Tooltip("Objects that can become the model target. When enabled, the nearest one is assigned to activeObject automatically.")]
+        public AuraXRDemoObject[] candidateObjects;
+        public bool useNearestObject = true;
         public AuraXRDemoObject activeObject;
         public TextAsset modelStatsJson;
         [Tooltip("Relative to Application.streamingAssetsPath, used when modelStatsJson is not imported as TextAsset.")]
@@ -73,7 +76,15 @@ namespace AuraXR.Demo
         {
             NewFrameReady = false;
 
-            if (Stats == null || wrist == null || activeObject == null)
+            if (Stats == null || wrist == null)
+            {
+                modelState = "missing_refs";
+                return;
+            }
+
+            UpdateNearestObject();
+
+            if (activeObject == null)
             {
                 modelState = "missing_refs";
                 return;
@@ -89,6 +100,7 @@ namespace AuraXR.Demo
             {
                 _cachedColObject = activeObject;
                 _cachedCollider = activeObject.GetComponentInChildren<Collider>();
+                ResetTemporalWindow();
             }
 
             float sampleDt = 1f / Mathf.Max(featureHz, 1f);
@@ -97,6 +109,67 @@ namespace AuraXR.Demo
             _accum = 0f;
             SampleFrame();
             NewFrameReady = true;
+        }
+
+        private void UpdateNearestObject()
+        {
+            if (!useNearestObject || candidateObjects == null || candidateObjects.Length == 0) return;
+
+            AuraXRDemoObject nearest = null;
+            float best = float.PositiveInfinity;
+            for (int i = 0; i < candidateObjects.Length; i++)
+            {
+                AuraXRDemoObject candidate = candidateObjects[i];
+                if (candidate == null) continue;
+
+                float distance = ComputeDistanceToCandidateM(candidate);
+                if (distance < best)
+                {
+                    best = distance;
+                    nearest = candidate;
+                }
+            }
+
+            if (nearest != null && nearest != activeObject)
+                activeObject = nearest;
+        }
+
+        private float ComputeDistanceToCandidateM(AuraXRDemoObject candidate)
+        {
+            float best = float.PositiveInfinity;
+            Collider col = candidate.GetComponentInChildren<Collider>();
+            if (col != null)
+            {
+                AccumulateClosestDistance(col, wrist, ref best);
+                if (contactProbes != null)
+                {
+                    for (int i = 0; i < contactProbes.Length; i++)
+                        AccumulateClosestDistance(col, contactProbes[i], ref best);
+                }
+                return best;
+            }
+
+            AccumulatePointDistance(candidate.transform.position, wrist, ref best);
+            if (contactProbes != null)
+            {
+                for (int i = 0; i < contactProbes.Length; i++)
+                    AccumulatePointDistance(candidate.transform.position, contactProbes[i], ref best);
+            }
+            return best;
+        }
+
+        private void ResetTemporalWindow()
+        {
+            Array.Clear(_frameFeatFlat, 0, _frameFeatFlat.Length);
+            Array.Clear(_contactFlagFlat, 0, _contactFlagFlat.Length);
+            Array.Clear(_lastFrameFeat, 0, _lastFrameFeat.Length);
+            _writeIndex = 0;
+            activeWindowFill = 0;
+            _lastSampleTime = -1f;
+            _prevRelPos = Vector3.zero;
+            _hasPrevRelPos = false;
+            modelState = "warming_up";
+            NewFrameReady = false;
         }
 
         private void SampleFrame()
