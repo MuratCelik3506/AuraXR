@@ -1,0 +1,75 @@
+{
+  "n_points": 1024,
+  "point_format": "float32 little-endian xyz, normalized in Unity with model_stats pts_mean/pts_std",
+  "objects": [
+    {
+      "object_id": "mug_white",
+      "source": "/Users/muratcelik/Desktop/Thesis/Workspace/AuraXR/data/processed/hot3d_canonical/obj_pts/mug_white.npy",
+      "source_count": 1024,
+      "point_count": 1024,
+      "points_asset": "objects/mug_white_pts.bytes",
+      "bbox_min": [
+        -0.06709682941436768,
+        -0.00015541912580374628,
+        -0.04296071454882622
+      ],
+      "bbox_max": [
+        0.04847057908773422,
+        0.09132148325443268,
+        0.04775762930512428
+      ],
+      "bbox_size": [
+        0.1155674085021019,
+        0.09147690236568451,
+        0.0907183438539505
+      ],
+      "bbox_diagonal_m": 0.17307128012180328
+    },
+    {
+      "object_id": "can_parmesan",
+      "source": "/Users/muratcelik/Desktop/Thesis/Workspace/AuraXR/data/processed/hot3d_canonical/obj_pts/can_parmesan.npy",
+      "source_count": 1024,
+      "point_count": 1024,
+      "points_asset": "objects/can_parmesan_pts.bytes",
+      "bbox_min": [
+        -0.030888156965374947,
+        -5.5471016821684316e-05,
+        -0.038201216608285904
+      ],
+      "bbox_max": [
+        0.03544082120060921,
+        0.10215967148542404,
+        0.03237353265285492
+      ],
+      "bbox_size": [
+        0.0663289800286293,
+        0.10221514105796814,
+        0.07057474553585052
+      ],
+      "bbox_diagonal_m": 0.14081287384033203
+    },
+    {
+      "object_id": "spatula_red",
+      "source": "/Users/muratcelik/Desktop/Thesis/Workspace/AuraXR/data/processed/hot3d_canonical/obj_pts/spatula_red.npy",
+      "source_count": 1024,
+      "point_count": 1024,
+      "points_asset": "objects/spatula_red_pts.bytes",
+      "bbox_min": [
+        -0.15255220234394073,
+        -1.6279518604278564e-05,
+        -0.11337602883577347
+      ],
+      "bbox_max": [
+        0.14829286932945251,
+        0.04140522703528404,
+        0.09748412668704987
+      ],
+      "bbox_size": [
+        0.30084508657455444,
+        0.04142150655388832,
+        0.21086016297340393
+      ],
+      "bbox_diagonal_m": 0.3697100579738617
+    }
+  ]
+}

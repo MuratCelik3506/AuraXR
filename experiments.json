@@ -1,0 +1,54 @@
+[
+  {
+    "name": "full",
+    "description": "Full model: self-attention + dual heads + vel/acc loss (B4/B7/B8)",
+    "phases": [1, 2],
+    "phase_epochs": {"1": 30, "2": 50},
+    "_phase3_disabled": "success_label absent in HOT3D NPZ — re-enable when annotation pipeline is ready",
+    "args": {
+      "hidden": 256,
+      "z_dim": 64,
+      "kl_warmup_epochs": 10,
+      "vel_weight": 0.1,
+      "acc_weight": 0.05,
+      "quality_weight": 0.1,
+      "success_weight": 0.1,
+      "contact_weight": 0.05,
+      "penetration_weight": 0.1
+    }
+  },
+  {
+    "name": "ablation_no_vel",
+    "description": "Ablation: no GT-velocity/acceleration loss (B8 off)",
+    "phases": [1, 2],
+    "phase_epochs": {"1": 30, "2": 50},
+    "args": {
+      "hidden": 256,
+      "z_dim": 64,
+      "kl_warmup_epochs": 10,
+      "vel_weight": 0.0,
+      "acc_weight": 0.0,
+      "quality_weight": 0.1,
+      "success_weight": 0.0,
+      "contact_weight": 0.05,
+      "penetration_weight": 0.1
+    }
+  },
+  {
+    "name": "ablation_static_only",
+    "description": "Ablation: Phase 1 OakInk only, no temporal training",
+    "phases": [1],
+    "phase_epochs": {"1": 50},
+    "args": {
+      "hidden": 256,
+      "z_dim": 64,
+      "kl_warmup_epochs": 15,
+      "vel_weight": 0.0,
+      "acc_weight": 0.0,
+      "quality_weight": 0.1,
+      "success_weight": 0.0,
+      "contact_weight": 0.05,
+      "penetration_weight": 0.1
+    }
+  }
+]

@@ -21,7 +21,7 @@ data/object_assets/
 # Model checkpoints & exports
 checkpoints/
 onnx/
-data/
+/data/
 # Training outputs
 logs/
 results/
